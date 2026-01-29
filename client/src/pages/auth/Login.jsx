@@ -2,8 +2,8 @@ import { useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { useNavigate, Link } from "react-router-dom";
 import { Mail, Lock, Loader2, ArrowRight } from "lucide-react";
-import { auth } from "../services/firebase";
-import InputGroup from "../components/InputGroup";
+import { auth } from "../../services/firebase"; // Fixed Path
+import InputGroup from "../../components/InputGroup"; // Fixed Path
 
 function Login() {
   const [loading, setLoading] = useState(false);
@@ -18,7 +18,9 @@ function Login() {
 
     try {
       await signInWithEmailAndPassword(auth, form.email, form.password);
-      navigate("/dashboard");
+      // We don't need to navigate manually here; AuthContext + Layout will redirect automatically
+      // But for safety:
+      navigate("/dashboard"); 
     } catch {
       setError("Invalid email or password.");
     }
@@ -26,9 +28,7 @@ function Login() {
   };
 
   return (
-    // Applied matching gradient background so transparent Navbar is visible
     <div className="min-h-screen flex items-center justify-center p-4 pt-20 bg-linear-to-b from-[#0e2b4a] via-[#1c4066] to-slate-50">
-      
       <div className="max-w-md w-full bg-white rounded-2xl shadow-2xl overflow-hidden border border-white/20">
         <div className="px-8 pt-8 pb-4 text-center">
           <h2 className="text-2xl font-bold text-[#0e2b4a]">Partner Login</h2>

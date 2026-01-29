@@ -1,49 +1,63 @@
-import { useState, useEffect } from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "./services/firebase";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider, useAuth } from "./context/AuthContext";
 
-// Components & Pages
-import Navbar from "./components/Navbar";
-import Home from "./pages/Home";
-import Register from "./pages/Registration";
-import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
-import ClientRegister from "./pages/ClientRegister";
+// Components
+import Loader from "./components/Loader";
 
-function App() {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+// Layouts
+import AuthLayout from "./layouts/AuthLayout";
+import CaLayout from "./layouts/CaLayout";
+import AdminLayout from "./layouts/AdminLayout";
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
+// Pages
+import Login from "./pages/auth/Login";
+import Register from "./pages/auth/Register";
+import CaDashboard from "./pages/ca/CaDashboard";
+import AdminDashboard from "./pages/admin/AdminDashboard";
+import ClientRegister from "./pages/customer/ClientRegister";
 
-  if (loading) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-gray-50">
-        Loading...
-      </div>
-    );
-  }
+// This component can safely use useAuth() because it's wrapped by AuthProvider below
+function AppRoutes() {
+  const { loading } = useAuth();
+
+  // This prevents the "White Flash" by showing your branded loader
+  if (loading) return <Loader />;
 
   return (
-    <Router>
-      <div className="font-sans antialiased text-slate-900 bg-gray-50 min-h-screen">
-        <Navbar user={user} />
-        <Routes>
-          <Route path="/" element={user ? <Navigate to="/dashboard" /> : <Home />} />
-          <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login />} />
-          <Route path="/register" element={user ? <Navigate to="/dashboard" /> : <Register />} />
-          <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/login" />} />
-          <Route path="/client-register" element={user ? <Navigate to="/dashboard" /> : <ClientRegister />} />
-        </Routes>
-      </div>
-    </Router>
+    <BrowserRouter>
+      <Routes>
+        {/* Default Redirect */}
+        <Route path="/" element={<Navigate to="/login" replace />} />
+
+        {/* Public Routes */}
+        <Route element={<AuthLayout />}>
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/client-register" element={<ClientRegister />} />
+        </Route>
+
+        {/* CA Protected Routes */}
+        <Route element={<CaLayout />}>
+          <Route path="/dashboard" element={<CaDashboard />} />
+        </Route>
+
+        {/* Admin Protected Routes */}
+        <Route path="/admin" element={<AdminLayout />}>
+          <Route path="dashboard" element={<AdminDashboard />} />
+        </Route>
+
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
   );
 }
 

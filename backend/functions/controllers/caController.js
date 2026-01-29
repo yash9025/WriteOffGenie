@@ -35,20 +35,21 @@ export const registerCA = async (data, context) => {
 
     while (!isUnique && attempts < 5) {
       referralCode = generateReferralCode();
-      const existing = await db.collection("CAs").where("referralCode", "==", referralCode).get();
+     
+      const existing = await db.collection("Partners").where("referralCode", "==", referralCode).get();
       if (existing.empty) isUnique = true;
       attempts++;
     }
     
     if (!isUnique) throw new Error("System busy. Please try again.");
 
-    await db.collection("CAs").doc(userRecord.uid).set({
+    await db.collection("Partners").doc(userRecord.uid).set({
       name,
       email, 
       phone, 
       caRegNumber: caRegNumber || "", 
       referralCode,
-      role: "CA",
+      role: "ca", 
       status: "active",
       createdAt: FieldValue.serverTimestamp(),
       stats: {

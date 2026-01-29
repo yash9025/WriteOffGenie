@@ -2,10 +2,9 @@ import { useEffect, useState } from "react";
 import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { useNavigate } from "react-router-dom";
 import { Copy, Check, TrendingUp, Users, Wallet, Share2, Loader2, UserCheck } from "lucide-react";
-import { auth, db } from "../services/firebase";
-import { ReferralsList } from "../components/ReferralsList";
-
-;
+import { db } from "../../services/firebase"; // Removed 'auth' import, using context instead
+import { useAuth } from "../../context/AuthContext"; // 👈 IMPORTANT: Import this
+import { ReferralsList } from "../../components/ReferralsList";
 
 function StatCard({ icon: Icon, title, value }) {
   return (
@@ -22,6 +21,7 @@ function StatCard({ icon: Icon, title, value }) {
 }
 
 function Dashboard() {
+  const { user, loading } = useAuth(); // 👈 DESTRICT HERE
   const [profile, setProfile] = useState(null);
   const [referrals, setReferrals] = useState([]);
   const [copied, setCopied] = useState(false);
@@ -29,49 +29,66 @@ function Dashboard() {
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!auth.currentUser) return navigate("/login");
+      // 1. Wait for Auth to resolve
+      if (loading) return;
+
+      // 2. Redirect if not logged in
+      if (!user) {
+        navigate("/login");
+        return;
+      }
 
       try {
-        const uid = auth.currentUser.uid;
+        const uid = user.uid;
 
-        // Fetch CA Profile
-        const docSnap = await getDoc(doc(db, "CAs", uid));
+        // Fetch Partner Profile
+        const docSnap = await getDoc(doc(db, "Partners", uid));
+        
         if (docSnap.exists()) {
           setProfile(docSnap.data());
+        } else {
+          console.error("No partner profile found.");
         }
 
         // Fetch Referred Clients
         const q = query(
           collection(db, "Clients"), 
-          where("referredBy", "==", uid)
+          where("referredBy", "==", user.uid)
         );
+        
         const querySnapshot = await getDocs(q);
         const clientsList = querySnapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
         }));
         
-        // Sort by newest
-        clientsList.sort((a, b) => b.createdAt - a.createdAt);
+        // Sort by newest using Firestore Timestamp logic
+        clientsList.sort((a, b) => {
+          const timeA = a.createdAt?.seconds || 0;
+          const timeB = b.createdAt?.seconds || 0;
+          return timeB - timeA;
+        });
+
         setReferrals(clientsList);
 
       } catch (error) {
-        console.error("Error fetching dashboard:", error);
+        console.error("Error fetching dashboard data:", error);
       }
     };
 
     fetchData();
-  }, [navigate]);
-
+  }, [user, loading, navigate]);
 
   const copyLink = () => {
-    const link = `https://writeoffgenie.ai/join?ref=${profile?.referralCode}`;
+    if (!profile?.referralCode) return;
+    const link = `https://writeoffgenie.ai/join?ref=${profile.referralCode}`;
     navigator.clipboard.writeText(link);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  if (!profile) return (
+  // Show loader while profile is null OR while auth is loading
+  if (loading || !profile) return (
     <div className="min-h-screen bg-[#0e2b4a] flex items-center justify-center">
         <div className="flex flex-col items-center">
             <Loader2 className="animate-spin h-10 w-10 text-white mb-4" />
@@ -84,7 +101,7 @@ function Dashboard() {
     <main className="min-h-screen bg-linear-to-b from-[#0e2b4a] via-[#1c4066] to-slate-100 pt-28 pb-20 px-4 sm:px-6">
       <div className="max-w-7xl mx-auto space-y-8">
         
-        {/* Header */}
+        {/* Header Section */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-white">Dashboard</h1>
@@ -96,8 +113,8 @@ function Dashboard() {
           </div>
         </div>
 
-        {/* Hero / Referral Section */}
-        <div className="relative overflow-hidden rounded-3xl bg-white shadow-2xl transition-all hover:shadow-blue-900/20">
+        {/* Referral Link Card */}
+        <div className="relative overflow-hidden rounded-3xl bg-white shadow-2xl">
            <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50 rounded-full blur-3xl -mr-16 -mt-16 opacity-50"></div>
            
            <div className="relative z-10 p-8 sm:p-10 flex flex-col md:flex-row items-center justify-between gap-8">
@@ -118,7 +135,7 @@ function Dashboard() {
                   </div>
                   <button 
                     onClick={copyLink} 
-                    className="bg-[#0e2b4a] text-white px-6 py-3 rounded-xl font-bold hover:bg-[#1a3d61] transition-all flex items-center justify-center gap-2 shadow-lg hover:shadow-blue-900/30"
+                    className="bg-[#0e2b4a] text-white px-6 py-3 rounded-xl font-bold hover:bg-[#1a3d61] transition-all flex items-center justify-center gap-2 shadow-lg"
                   >
                     {copied ? <Check size={18} className="text-emerald-400"/> : <Copy size={18} />} 
                     {copied ? "Copied" : "Copy"}
@@ -152,7 +169,7 @@ function Dashboard() {
           />
         </div>
 
-        {/* Referrals Table */}
+        {/* List of Clients */}
         <ReferralsList referrals={referrals} />
 
       </div>

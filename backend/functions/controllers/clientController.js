@@ -15,8 +15,9 @@ export const registerClient = async (data, context) => {
         let linkedCAId = null;
 
         // Resolve Referral Code to CA UID
+        // Updated: Checks 'Partners' collection now
         if (referralCode) {
-            const caQuery = await db.collection("CAs")
+            const caQuery = await db.collection("Partners")
                 .where("referralCode", "==", referralCode)
                 .limit(1)
                 .get();
@@ -38,7 +39,7 @@ export const registerClient = async (data, context) => {
             name,
             email,
             phone: phone || "",
-            role: "CLIENT",
+            role: "client", // Lowercase for consistency
             referredBy: linkedCAId, 
             createdAt: FieldValue.serverTimestamp(),
             status: "active",
@@ -46,8 +47,9 @@ export const registerClient = async (data, context) => {
         });
 
         // Update CA Stats if linked
+        // Updated: Updates 'Partners' collection now
         if (linkedCAId) {
-            await db.collection("CAs").doc(linkedCAId).update({
+            await db.collection("Partners").doc(linkedCAId).update({
                 "stats.totalReferred": FieldValue.increment(1)
             });
         }
