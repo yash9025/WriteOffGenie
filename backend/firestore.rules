@@ -1,0 +1,21 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Rules for CAs
+    match /CAs/{userId} {
+      allow read: if true; 
+      allow write: if false; // Only Backend writes
+    }
+
+    // Rules for Clients
+    match /Clients/{clientId} {
+      // Allow read if user is the Referrer (CA) or the Owner (Client)
+      allow read: if request.auth != null && (
+        resource.data.referredBy == request.auth.uid || request.auth.uid == clientId
+      );
+      
+      allow write: if false; // Only Backend writes
+    }
+  }
+}
