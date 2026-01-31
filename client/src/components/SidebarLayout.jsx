@@ -32,9 +32,9 @@ export default function SidebarLayout({ children }) {
   const menuItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
     { icon: Activity, label: "Performance", path: "/performance" },
-    { icon: Users, label: "Client Network", path: "/partner/network" },
+    { icon: Users, label: "Client Network", path: "/my-referrals" },
     { icon: Wallet, label: "Payouts", path: "/payouts" },
-    { icon: Settings, label: "Settings", path: "/settings" },
+    // { icon: Settings, label: "Settings", path: "/settings" },
   ];
 
   return (
@@ -124,7 +124,7 @@ export default function SidebarLayout({ children }) {
                   Verified
                 </p>
               </div>
-              <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-indigo-600 to-indigo-500 flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-500/20">
+              <div className="h-10 w-10 rounded-lg bg-linear-to-br from-indigo-600 to-indigo-500 flex items-center justify-center text-white font-bold shadow-lg shadow-indigo-500/20">
                 CA
               </div>
               <ChevronDown size={16} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
