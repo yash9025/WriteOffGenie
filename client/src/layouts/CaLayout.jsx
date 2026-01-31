@@ -2,6 +2,7 @@ import { Outlet, Navigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import Navbar from "../components/Navbar";
 import Loader from "../components/Loader";
+import SidebarLayout from "../components/SidebarLayout";
 
 const CaLayout = () => {
   const { user, role, loading } = useAuth();
@@ -20,8 +21,10 @@ const CaLayout = () => {
 
   return (
     <>
-      <Navbar user={user} role={role} />
+    <SidebarLayout>
       <Outlet />
+    </SidebarLayout>
+      
     </>
   );
 };

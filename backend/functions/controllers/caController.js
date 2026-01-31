@@ -1,11 +1,7 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { https } from "firebase-functions";
 import crypto from "crypto";
-
-// Import Default Export (No curly braces)
 import validRegistration from "../utils/validator.js"; 
-
-// Import Config
 import { db, auth } from "../firebaseConfig.js"; 
 
 const generateReferralCode = () => "CA-" + crypto.randomBytes(3).toString("hex").toUpperCase();
@@ -52,11 +48,12 @@ export const registerCA = async (data, context) => {
       role: "ca", 
       status: "active",
       createdAt: FieldValue.serverTimestamp(),
+      walletBalance: 0,
       stats: {
         totalReferred: 0,
         totalEarnings: 0, 
-        walletBalance: 0 
-      }
+        totalSubscribed:0
+      } 
     });
 
     return { success: true, uid: userRecord.uid };

@@ -1,0 +1,68 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- HELPERS ---
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // 👑 ADMIN ACCESS CHECK
+    // ⚠️ REPLACE THIS STRING with your actual Admin UID from Firebase Console -> Authentication
+    function isAdmin() {
+      return isSignedIn() && request.auth.uid == "eVWazg7GGvYkGugvLR8YPiX25Io1";
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Prevents frontend from editing financial or structural fields
+    function isSafeUpdate() {
+      let forbidden = ['walletBalance', 'stats', 'role', 'status', 'referralCode', 'adminNote'];
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(forbidden);
+    }
+
+    // --- COLLECTIONS ---
+
+    match /Partners/{userId} {
+      // Admin can see all partners; Users see only themselves
+      allow read: if isOwner(userId) || isAdmin();
+      
+      // Admin writes happen via Cloud Functions (Admin SDK), so we don't need 'allow write' here for Admin
+      allow update: if isOwner(userId) && isSafeUpdate();
+      allow write: if false;
+
+      // 🏦 Bank Details (Sub-collection)
+      match /Sensitive/BankDetails {
+        // Admin needs to read this to verify bank info before paying out
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isOwner(userId);
+      }
+    }
+
+    match /Clients/{clientId} {
+      // Admin can search/list all clients
+      allow list: if isSignedIn(); 
+
+      // Admin can get specific client details
+      allow get: if isAdmin() || (isSignedIn() && (
+        request.auth.uid == clientId || 
+        resource.data.referredBy == request.auth.uid
+      ));
+      
+      allow write: if false;
+    }
+
+    match /Payouts/{payoutId} {
+      // Admin can see the entire ledger; Partners see only their own
+      // Note: Using 'partner_id' to match your Backend Controller
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == resource.data.partner_id);
+      
+      // All financial writes must come from Cloud Functions
+      allow write: if false; 
+    }
+  }
+}

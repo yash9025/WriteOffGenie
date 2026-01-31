@@ -1,179 +1,375 @@
-import { useEffect, useState } from "react";
-import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
-import { useNavigate } from "react-router-dom";
-import { Copy, Check, TrendingUp, Users, Wallet, Share2, Loader2, UserCheck } from "lucide-react";
-import { db } from "../../services/firebase"; // Removed 'auth' import, using context instead
-import { useAuth } from "../../context/AuthContext"; // 👈 IMPORTANT: Import this
-import { ReferralsList } from "../../components/ReferralsList";
+import React, { useEffect, useState } from "react";
+import { doc, onSnapshot, collection, query, where, getDocs } from "firebase/firestore";
+import { Link } from "react-router-dom"; // 🚀 Import Link
+import { 
+  Copy, Check, Users, Wallet, TrendingUp, Target, 
+  DollarSign, Award, ArrowUpRight, Loader2, ExternalLink,
+  CheckCircle2, Clock, AlertCircle
+} from "lucide-react";
+import { db } from "../../services/firebase";
+import { useAuth } from "../../context/AuthContext";
 
-function StatCard({ icon: Icon, title, value }) {
+// Enhanced Stat Card with better visual hierarchy
+const MetricCard = ({ title, value, icon: Icon, trend, trendValue, color = "indigo", isLoading }) => {
+  const colorClasses = {
+    indigo: "from-indigo-600 to-indigo-500 shadow-indigo-500/20",
+    emerald: "from-emerald-600 to-emerald-500 shadow-emerald-500/20",
+    amber: "from-amber-600 to-amber-500 shadow-amber-500/20",
+    violet: "from-violet-600 to-violet-500 shadow-violet-500/20",
+  };
+
+  const bgClasses = {
+    indigo: "bg-indigo-50 text-indigo-600",
+    emerald: "bg-emerald-50 text-emerald-600",
+    amber: "bg-amber-50 text-amber-600",
+    violet: "bg-violet-50 text-violet-600",
+  };
+
   return (
-    <div className="bg-white/95 backdrop-blur-sm p-6 rounded-2xl border border-white/20 shadow-xl hover:-translate-y-1 transition-all duration-300">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-slate-500 text-sm font-bold uppercase tracking-wider">{title}</h3>
-        <div className="p-2.5 bg-blue-50 text-[#0e2b4a] rounded-xl">
-          <Icon size={22} />
+    <div className="bg-white rounded-2xl border border-slate-200 p-6 hover:shadow-lg hover:shadow-slate-200/50 transition-all duration-300 group">
+      <div className="flex items-start justify-between mb-4">
+        <div className={`p-3 rounded-xl ${bgClasses[color]} group-hover:scale-110 transition-transform duration-300`}>
+          <Icon size={24} strokeWidth={2} />
         </div>
+        {trend && (
+          <div className="flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg">
+            <TrendingUp size={14} />
+            <span className="text-xs font-semibold">{trendValue}</span>
+          </div>
+        )}
       </div>
-      <p className="text-3xl font-extrabold text-[#0e2b4a]">{value}</p>
+      <div>
+        <p className="text-slate-500 text-xs font-medium mb-1">{title}</p>
+        <h3 className="text-2xl font-bold text-slate-900">
+          {isLoading ? (
+            <div className="h-8 w-24 bg-slate-100 animate-pulse rounded" />
+          ) : (
+            value
+          )}
+        </h3>
+      </div>
     </div>
   );
-}
+};
 
 function Dashboard() {
-  const { user, loading } = useAuth(); // 👈 DESTRICT HERE
+  const { user, loading: authLoading } = useAuth();
   const [profile, setProfile] = useState(null);
   const [referrals, setReferrals] = useState([]);
   const [copied, setCopied] = useState(false);
-  const navigate = useNavigate();
+  const [dataLoading, setDataLoading] = useState(true);
+
+  // Target Logic
+  const [monthlyTarget, setMonthlyTarget] = useState(() => 
+    Number(localStorage.getItem("ca_monthly_target")) || 50000
+  );
 
   useEffect(() => {
-    const fetchData = async () => {
-      // 1. Wait for Auth to resolve
-      if (loading) return;
+    if (authLoading || !user) return;
 
-      // 2. Redirect if not logged in
-      if (!user) {
-        navigate("/login");
-        return;
-      }
+    const unsubProfile = onSnapshot(doc(db, "Partners", user.uid), (docSnap) => {
+      if (docSnap.exists()) setProfile(docSnap.data());
+      setDataLoading(false);
+    });
 
+    const fetchReferrals = async () => {
       try {
-        const uid = user.uid;
-
-        // Fetch Partner Profile
-        const docSnap = await getDoc(doc(db, "Partners", uid));
-        
-        if (docSnap.exists()) {
-          setProfile(docSnap.data());
-        } else {
-          console.error("No partner profile found.");
-        }
-
-        // Fetch Referred Clients
-        const q = query(
-          collection(db, "Clients"), 
-          where("referredBy", "==", user.uid)
-        );
-        
+        const q = query(collection(db, "Clients"), where("referredBy", "==", user.uid));
         const querySnapshot = await getDocs(q);
-        const clientsList = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        
-        // Sort by newest using Firestore Timestamp logic
-        clientsList.sort((a, b) => {
-          const timeA = a.createdAt?.seconds || 0;
-          const timeB = b.createdAt?.seconds || 0;
-          return timeB - timeA;
-        });
-
-        setReferrals(clientsList);
-
-      } catch (error) {
-        console.error("Error fetching dashboard data:", error);
-      }
+        const clients = querySnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        clients.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+        setReferrals(clients);
+      } catch (err) { console.error(err); }
     };
+    fetchReferrals();
+    return () => unsubProfile();
+  }, [user, authLoading]);
 
-    fetchData();
-  }, [user, loading, navigate]);
+  const currentMonthEarnings = referrals.reduce((acc, client) => {
+    const date = client.createdAt?.toDate();
+    const now = new Date();
+    if (date && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()) {
+      return acc + (client.subscription?.amountPaid || 0) * 0.1;
+    }
+    return acc;
+  }, 0);
+
+  const activeSubs = referrals.filter((c) => c.subscription?.status === "active").length;
+  const targetPercent = Math.min(Math.round((currentMonthEarnings / monthlyTarget) * 100), 100);
+  const conversionRate = referrals.length ? Math.round((activeSubs / referrals.length) * 100) : 0;
 
   const copyLink = () => {
     if (!profile?.referralCode) return;
     const link = `https://writeoffgenie.ai/join?ref=${profile.referralCode}`;
     navigator.clipboard.writeText(link);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopied(false), 2500);
   };
 
-  // Show loader while profile is null OR while auth is loading
-  if (loading || !profile) return (
-    <div className="min-h-screen bg-[#0e2b4a] flex items-center justify-center">
-        <div className="flex flex-col items-center">
-            <Loader2 className="animate-spin h-10 w-10 text-white mb-4" />
-            <p className="text-blue-200 font-medium">Loading Dashboard...</p>
-        </div>
+  if (authLoading || dataLoading) return (
+    <div className="h-[80vh] flex flex-col items-center justify-center gap-4">
+      <Loader2 className="animate-spin text-indigo-600" size={48} strokeWidth={2.5} />
+      <p className="text-sm font-medium text-slate-500">Loading dashboard...</p>
     </div>
   );
 
   return (
-    <main className="min-h-screen bg-linear-to-b from-[#0e2b4a] via-[#1c4066] to-slate-100 pt-28 pb-20 px-4 sm:px-6">
-      <div className="max-w-7xl mx-auto space-y-8">
-        
-        {/* Header Section */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-white">Dashboard</h1>
-            <p className="text-blue-200 mt-1">Welcome back, {profile.name}</p>
+    <div className="space-y-8">
+      
+      {/* Welcome Header */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="h-1 w-8 bg-indigo-600 rounded-full" />
+            <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Partner Dashboard</span>
           </div>
-          <div className="flex items-center gap-2 bg-white/10 backdrop-blur-md px-4 py-2 rounded-full border border-white/20 text-sm font-medium text-white shadow-sm">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_10px_#34d399]"></div>
-            Partner Active
+          <h1 className="text-3xl font-bold text-slate-900 mb-1">
+            Welcome back, <span className="text-indigo-600">{profile?.name || "Partner"}</span>
+          </h1>
+          <p className="text-slate-600">Here's what's happening with your referral network today.</p>
+        </div>
+
+        {/* Referral Card */}
+        <div className="bg-gradient-to-br from-indigo-600 to-indigo-500 rounded-2xl p-6 text-white shadow-xl shadow-indigo-500/30 max-w-md">
+          <p className="text-indigo-100 text-xs font-medium mb-2 uppercase tracking-wide">Your Referral Link</p>
+          <div className="flex items-center gap-3">
+            <div className="flex-1 bg-white/10 backdrop-blur-sm rounded-xl px-4 py-3 border border-white/20">
+              <p className="font-mono text-sm font-semibold truncate">{profile?.referralCode || "LOADING..."}</p>
+            </div>
+            <button
+              onClick={copyLink}
+              className={`px-5 py-3 rounded-xl font-semibold transition-all flex items-center gap-2 ${
+                copied 
+                  ? "bg-emerald-500 hover:bg-emerald-600" 
+                  : "bg-white text-indigo-600 hover:bg-indigo-50"
+              }`}
+            >
+              {copied ? (
+                <>
+                  <Check size={18} strokeWidth={2.5} />
+                  Copied!
+                </>
+              ) : (
+                <>
+                  <Copy size={18} />
+                  Copy
+                </>
+              )}
+            </button>
           </div>
         </div>
-
-        {/* Referral Link Card */}
-        <div className="relative overflow-hidden rounded-3xl bg-white shadow-2xl">
-           <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50 rounded-full blur-3xl -mr-16 -mt-16 opacity-50"></div>
-           
-           <div className="relative z-10 p-8 sm:p-10 flex flex-col md:flex-row items-center justify-between gap-8">
-             <div className="max-w-xl text-center md:text-left space-y-4">
-               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-blue-50 text-[#0e2b4a] text-xs font-bold uppercase tracking-wide">
-                 <Share2 size={14} /> Referral Program
-               </div>
-               <h2 className="text-3xl font-bold text-slate-900">Grow your revenue</h2>
-               <p className="text-slate-600 text-lg leading-relaxed">
-                 Share your unique link. You earn recurring commissions automatically when your clients subscribe.
-               </p>
-             </div>
-
-             <div className="w-full md:w-auto bg-slate-50 p-3 rounded-2xl border border-slate-200 shadow-inner">
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <div className="px-4 py-3 text-slate-600 font-mono text-sm flex items-center justify-center bg-white border border-slate-200 rounded-xl min-w-[240px]">
-                    writeoffgenie.ai/join?ref={profile.referralCode}
-                  </div>
-                  <button 
-                    onClick={copyLink} 
-                    className="bg-[#0e2b4a] text-white px-6 py-3 rounded-xl font-bold hover:bg-[#1a3d61] transition-all flex items-center justify-center gap-2 shadow-lg"
-                  >
-                    {copied ? <Check size={18} className="text-emerald-400"/> : <Copy size={18} />} 
-                    {copied ? "Copied" : "Copy"}
-                  </button>
-                </div>
-             </div>
-           </div>
-        </div>
-
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatCard 
-            icon={Wallet} 
-            title="Total Earnings" 
-            value={`₹${(profile.stats?.totalEarnings || 0).toLocaleString()}`} 
-          />
-          <StatCard 
-            icon={TrendingUp} 
-            title="Wallet Balance" 
-            value={`₹${(profile.stats?.walletBalance || 0).toLocaleString()}`} 
-          />
-          <StatCard 
-            icon={Users} 
-            title="Total Referred" 
-            value={profile.stats?.totalReferred || 0} 
-          />
-          <StatCard 
-            icon={UserCheck} 
-            title="Active Subscribers" 
-            value={profile.stats?.totalSubscribed || 0} 
-          />
-        </div>
-
-        {/* List of Clients */}
-        <ReferralsList referrals={referrals} />
-
       </div>
-    </main>
+
+      {/* Key Metrics Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <MetricCard 
+          title="Lifetime Earnings" 
+          value={`₹${(profile?.stats?.totalEarnings || 0).toLocaleString()}`} 
+          icon={DollarSign}
+          color="indigo"
+          isLoading={dataLoading}
+        />
+        <MetricCard 
+          title="This Month" 
+          value={`₹${currentMonthEarnings.toLocaleString()}`} 
+          icon={TrendingUp}
+          trend={true}
+          trendValue={`${targetPercent}%`}
+          color="emerald"
+          isLoading={dataLoading}
+        />
+        <MetricCard 
+          title="Wallet Balance" 
+          value={`₹${(profile?.walletBalance || 0).toLocaleString()}`} 
+          icon={Wallet}
+          color="amber"
+          isLoading={dataLoading}
+        />
+        <MetricCard 
+          title="Active Clients" 
+          value={activeSubs} 
+          icon={Users}
+          trend={true}
+          trendValue={`${conversionRate}%`}
+          color="violet"
+          isLoading={dataLoading}
+        />
+      </div>
+
+      {/* Progress & Insights Row */}
+      <div className="grid lg:grid-cols-3 gap-6">
+        
+        {/* Monthly Goal Progress */}
+        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-8">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <Target className="text-indigo-600" size={20} />
+                Monthly Revenue Goal
+              </h3>
+              <p className="text-sm text-slate-600 mt-1">Track your progress against your monthly target</p>
+            </div>
+            <button className="text-sm text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1">
+              Edit <ArrowUpRight size={16} />
+            </button>
+          </div>
+
+          <div className="space-y-6">
+            <div className="flex items-end justify-between">
+              <div>
+                <p className="text-4xl font-bold text-indigo-600">{targetPercent}%</p>
+                <p className="text-sm text-slate-600 mt-1">of monthly goal achieved</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-slate-500">Current / Target</p>
+                <p className="text-lg font-bold text-slate-900">
+                  ₹{currentMonthEarnings.toLocaleString()} / ₹{monthlyTarget.toLocaleString()}
+                </p>
+              </div>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="relative">
+              <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-indigo-600 to-indigo-500 rounded-full transition-all duration-1000 ease-out relative"
+                  style={{ width: `${targetPercent}%` }}
+                >
+                  <div className="absolute inset-0 bg-white/20 animate-pulse" />
+                </div>
+              </div>
+              <div className="flex justify-between mt-2 text-xs text-slate-500">
+                <span>₹0</span>
+                <span>₹{(monthlyTarget / 2).toLocaleString()}</span>
+                <span>₹{monthlyTarget.toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Stats */}
+        <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-8 text-white relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16" />
+          <div className="absolute bottom-0 left-0 w-24 h-24 bg-indigo-500/10 rounded-full -ml-12 -mb-12" />
+          
+          <div className="relative z-10">
+            <div className="flex items-center gap-2 mb-6">
+              <Award className="text-amber-400" size={24} />
+              <h3 className="text-lg font-bold">Performance</h3>
+            </div>
+
+            <div className="space-y-6">
+              <div className="flex justify-between items-center pb-4 border-b border-white/10">
+                <span className="text-slate-300 text-sm">Total Leads</span>
+                <span className="text-2xl font-bold">{referrals.length}</span>
+              </div>
+              <div className="flex justify-between items-center pb-4 border-b border-white/10">
+                <span className="text-slate-300 text-sm">Conversions</span>
+                <span className="text-2xl font-bold text-emerald-400">{activeSubs}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-300 text-sm">Success Rate</span>
+                <span className="text-3xl font-bold text-amber-400">{conversionRate}%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Recent Activity Table */}
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="px-8 py-6 border-b border-slate-200 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">Recent Activity</h3>
+            <p className="text-sm text-slate-600 mt-0.5">Your latest client acquisitions</p>
+          </div>
+          
+          {/* 🚀 UPDATED LINK */}
+          <Link 
+            to="/my-referrals" 
+            className="text-sm text-indigo-600 hover:text-indigo-700 font-semibold flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-indigo-50 transition-colors"
+          >
+            View All <ExternalLink size={14} />
+          </Link>
+
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th className="px-8 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Client</th>
+                <th className="px-8 py-4 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">Status</th>
+                <th className="px-8 py-4 text-center text-xs font-semibold text-slate-600 uppercase tracking-wider">Commission</th>
+                <th className="px-8 py-4 text-right text-xs font-semibold text-slate-600 uppercase tracking-wider">Date</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {referrals.slice(0, 5).map((client) => (
+                <tr key={client.id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-8 py-5">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-600 to-indigo-500 text-white flex items-center justify-center font-semibold shadow-lg shadow-indigo-500/20">
+                        {client.name?.charAt(0) || "?"}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{client.name}</p>
+                        <p className="text-xs text-slate-500">{client.email}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-8 py-5">
+                    <div className="flex items-center gap-2">
+                      {client.subscription?.status === "active" ? (
+                        <>
+                          <CheckCircle2 size={16} className="text-emerald-600" />
+                          <span className="text-sm font-medium text-emerald-600">Active</span>
+                        </>
+                      ) : client.subscription?.status === "expired" ? (
+                        <>
+                          <AlertCircle size={16} className="text-amber-600" />
+                          <span className="text-sm font-medium text-amber-600">Expired</span>
+                        </>
+                      ) : (
+                        <>
+                          <Clock size={16} className="text-slate-400" />
+                          <span className="text-sm font-medium text-slate-500">Pending</span>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-8 py-5 text-center">
+                    <span className="text-sm font-semibold text-slate-900">
+                      ₹{((client.subscription?.amountPaid || 0) * 0.1).toLocaleString()}
+                    </span>
+                  </td>
+                  <td className="px-8 py-5 text-right">
+                    <span className="text-sm text-slate-600">
+                      {client.createdAt?.toDate().toLocaleDateString("en-IN", { 
+                        day: "2-digit", 
+                        month: "short",
+                        year: "numeric"
+                      })}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {referrals.length === 0 && (
+                <tr>
+                  <td colSpan="4" className="px-8 py-12 text-center">
+                    <div className="flex flex-col items-center gap-2">
+                      <Users size={48} className="text-slate-300" />
+                      <p className="text-slate-600 font-medium">No clients yet</p>
+                      <p className="text-sm text-slate-500">Start sharing your referral link to grow your network</p>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }
 

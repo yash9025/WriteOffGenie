@@ -1,27 +1,137 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // 🔒 Partners (CAs)
-    match /Partners/{userId} {
-      // Allow user to see their own profile
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if false;
+    match /transation_history/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
     }
 
-    // 🔒 Clients
-    match /Clients/{clientId} {
-      // Allow the list query ONLY if the user is logged in
-      // Firestore will automatically enforce the .where() filter from your code
-      allow list: if request.auth != null;
+    match /pending_transation/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
 
-      // Allow getting a specific document only if they are the owner or the CA
-      allow get: if request.auth != null && (
-        request.auth.uid == clientId || 
-        resource.data.referredBy == request.auth.uid
-      );
+    
+    // --- HELPER FUNCTIONS ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+    
+    function isPartner() {
+      return isSignedIn() && request.auth.token.role == 'partner';
+    }
+    
+    function isSafeUserUpdate() {
+      let forbidden = ['walletBalance', 'stats', 'role', 'status', 'referralCode', 'emailVerified', 'createdAt'];
+      let allowed = ['displayName', 'photoURL', 'phoneNumber', 'businessName', 'address'];
+      return request.resource.data.keys().hasOnly(allowed);
+    }
+    
+    function isSafeBusinessUpdate() {
+      let forbidden = ['ownerId', 'createdAt', 'verified'];
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(forbidden);
+    }
+    
+    // --- PUBLIC READ-ONLY COLLECTIONS ---
+    match /category/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+    
+    match /support/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+    
+    // --- USER DOCUMENTS ---
+    match /user/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+    
+    // --- BUSINESS PROFILES (with hierarchy) ---
+    match /user/{parent}/business_profile/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
 
-      allow write: if false;
+    match /{path=**}/business_profile/{document} {
+      allow read: if true;
+    }
+
+
+    
+    // Global business profile access (if needed for search)
+    
+    // --- SUBSCRIPTIONS ---
+    match /user/{parent}/subscription/{document} {
+      allow create: if request.auth.uid == parent;
+      allow read: if request.auth.uid == parent;
+      allow write: if request.auth.uid == parent;
+      allow delete: if request.auth.uid == parent;
+    }
+    
+    // --- FINANCIAL DATA (STRICT RULES) ---
+    match /transaction_history/{document} {
+       allow create: if true; // Allow user creation during signup
+      allow read: if true; // Users can read only their own data
+      allow update: if true; // Limited field updates
+      allow delete: if true; // Only admin can delete users
+    }
+    
+    match /pending_transaction/{document} {
+       allow create: if true; // Allow user creation during signup
+      allow read: if true; // Users can read only their own data
+      allow update: if true; // Limited field updates
+      allow delete: if true; // Only admin can delete users
+    }
+    
+    match /Payouts/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+    
+    // --- PARTNERS (CAs) ---
+    match /Partners/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+    
+    // --- CLIENTS ---
+    match /Clients/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+    
+    // --- CATCH-ALL DENY ---
+    match /{document=**} {
+      allow read, write: if true;
     }
   }
 }

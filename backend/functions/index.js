@@ -14,21 +14,40 @@ import admin from "firebase-admin";
 // Import your custom logic
 import { registerCA as registerCALogic } from "./controllers/caController.js";
 import { registerClient as registerClientLogic } from "./controllers/clientController.js";
+import { requestWithdrawal as requestWithdrawalLogic } from "./controllers/payoutController.js";
+import { 
+    toggleCAStatus as toggleCAStatusLogic, 
+    processWithdrawal as processWithdrawalLogic 
+} from "./controllers/adminController.js";
 
-// For cost control... (Same comments as before)
+// For cost control...
 setGlobalOptions({ maxInstances: 10 });
 
 
-// Export the Cloud Function
+// --- PUBLIC FUNCTIONS ---
 
 export const registerCA = onCall(async (request) => {
     const { data, auth } = request;
-
     return await registerCALogic(data, auth);
 });
 
 export const registerClient = onCall(async (request) => {
     const { data, auth } = request;
-
     return await registerClientLogic(data, auth);
+});
+
+export const requestWithdrawal = onCall(async (request) => {
+    const { data, auth } = request;
+    return await requestWithdrawalLogic(data, auth);
+});
+
+
+// --- ADMIN FUNCTIONS ---
+
+export const toggleCAStatus = onCall(async (request) => {
+    return await toggleCAStatusLogic(request.data, request);
+});
+
+export const processWithdrawal = onCall(async (request) => {
+    return await processWithdrawalLogic(request.data, request);
 });
