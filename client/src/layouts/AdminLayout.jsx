@@ -88,15 +88,11 @@ export default function AdminLayout() {
         {/* Top Bar */}
         <header className="h-20 border-b border-slate-200 bg-white/80 backdrop-blur-xl sticky top-0 z-30 px-8 flex items-center justify-end">
           <div className="flex items-center gap-6">
-             <button className="relative p-2 text-slate-400 hover:text-blue-600 transition-colors">
-                <Bell size={20} />
-                <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
-             </button>
+             
              <div className="h-8 w-[1px] bg-slate-200"></div>
              <div className="flex items-center gap-3">
                 <div className="text-right hidden md:block">
                     <p className="text-xs font-bold text-slate-900">System Admin</p>
-                    <p className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full inline-block">ROOT ACCESS</p>
                 </div>
                 <div className="h-10 w-10 bg-slate-900 rounded-full ring-4 ring-slate-100 flex items-center justify-center text-white shadow-sm">
                     <ShieldCheck size={18} />

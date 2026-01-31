@@ -107,13 +107,13 @@ export default function SidebarLayout({ children }) {
 
           <div className="flex items-center gap-4">
             {/* Notifications */}
-            <button className="relative p-2.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all">
+            {/* <button className="relative p-2.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all">
               <Bell size={20} />
               <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white" />
-            </button>
+            </button> */}
 
             {/* Divider */}
-            <div className="h-8 w-px bg-slate-200" />
+            {/* <div className="h-8 w-px bg-slate-200" /> */}
 
             {/* User Profile */}
             <div className="flex items-center gap-3 cursor-pointer hover:bg-slate-50 rounded-lg px-3 py-2 transition-all group">
