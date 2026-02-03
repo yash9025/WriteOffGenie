@@ -1,17 +1,14 @@
-/**
- * Import function triggers from their respective submodules:
- *
- * import {onCall} from "firebase-functions/v2/https";
- * import {onDocumentWritten} from "firebase-functions/v2/firestore";
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
- */
-
 import { setGlobalOptions } from "firebase-functions/v2";
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onCall } from "firebase-functions/v2/https";
 import admin from "firebase-admin";
 
-// Import your custom logic
+// Initialize the Admin SDK (Required for Firestore/Auth to work)
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
+
+// 1. Import Logic-Only Controllers
+// These are just functions, so we wrap them in onCall here.
 import { registerCA as registerCALogic } from "./controllers/caController.js";
 import { registerClient as registerClientLogic } from "./controllers/clientController.js";
 import { requestWithdrawal as requestWithdrawalLogic } from "./controllers/payoutController.js";
@@ -19,24 +16,28 @@ import {
     toggleCAStatus as toggleCAStatusLogic, 
     processWithdrawal as processWithdrawalLogic 
 } from "./controllers/adminController.js";
-import { sendReferralInvite } from "./controllers/emailController.js";
-// For cost control...
+
+// 2. Export Pre-configured Triggers Directly
+// We export this directly because it is ALREADY defined as an onCall function in the controller
+export { sendReferralInvite } from "./controllers/emailController.js"; 
+
+// Set Max Instances
 setGlobalOptions({ maxInstances: 10 });
 
+// --- PUBLIC FUNCTIONS (Wrapped with CORS) ---
+// We add { cors: true } here to prevent CORS errors on these functions too.
 
-// --- PUBLIC FUNCTIONS ---
-
-export const registerCA = onCall(async (request) => {
+export const registerCA = onCall({ cors: true }, async (request) => {
     const { data, auth } = request;
     return await registerCALogic(data, auth);
 });
 
-export const registerClient = onCall(async (request) => {
+export const registerClient = onCall({ cors: true }, async (request) => {
     const { data, auth } = request;
     return await registerClientLogic(data, auth);
 });
 
-export const requestWithdrawal = onCall(async (request) => {
+export const requestWithdrawal = onCall({ cors: true }, async (request) => {
     const { data, auth } = request;
     return await requestWithdrawalLogic(data, auth);
 });
@@ -44,16 +45,10 @@ export const requestWithdrawal = onCall(async (request) => {
 
 // --- ADMIN FUNCTIONS ---
 
-export const toggleCAStatus = onCall(async (request) => {
+export const toggleCAStatus = onCall({ cors: true }, async (request) => {
     return await toggleCAStatusLogic(request.data, request);
 });
 
-export const processWithdrawal = onCall(async (request) => {
+export const processWithdrawal = onCall({ cors: true }, async (request) => {
     return await processWithdrawalLogic(request.data, request);
-});
-
-// EMAIL CONTROLLER
-
-export const sendReferralInvite = onCall(async (request) => {
-    return await sendReferralInvite(request.data, request);
 });

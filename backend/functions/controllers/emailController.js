@@ -1,10 +1,11 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { Resend } from "resend";
 
-
-const resend = new Resend(process.env.RESEND_EMAIL_API_KEY);
-
-export const sendReferralInvite = onCall(async (request) => {
+// ✅ Add { cors: true } here
+export const sendReferralInvite = onCall({ cors: true }, async (request) => {
+    // Initialize Resend inside the function where env var is available
+    const resend = new Resend(process.env.RESEND_EMAIL_API_KEY);
+    
     // 1. Auth Check: Ensure user is logged in
     if (!request.auth) {
         throw new HttpsError('unauthenticated', 'You must be logged in to send invites.');
