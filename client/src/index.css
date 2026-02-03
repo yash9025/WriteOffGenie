@@ -1,1 +1,19 @@
 @import "tailwindcss";
+
+/* Import Inter font from Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/* Base styles */
+* {
+  font-family: 'Inter', sans-serif;
+}
+
+/* Custom placeholder color */
+input::placeholder {
+  color: #9499A1;
+}
+
+/* Smooth transitions */
+button, a, input {
+  transition: all 0.2s ease;
+}

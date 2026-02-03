@@ -2,9 +2,8 @@ import { useState } from "react";
 import { httpsCallable } from "firebase/functions";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { useNavigate, Link } from "react-router-dom";
-import { User, Mail, Lock, Phone, Briefcase, Loader2, ArrowRight } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { functions, auth } from "../../services/firebase"; 
-import InputGroup from "../../components/InputGroup"; 
 
 function Register() {
   const [form, setForm] = useState({
@@ -40,35 +39,182 @@ function Register() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 pt-24 bg-linear-to-b from-[#0e2b4a] via-[#1c4066] to-slate-50">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-2xl overflow-hidden border border-white/20">
-        <div className="px-8 pt-8 pb-4 text-center">
-          <h2 className="text-2xl font-bold text-[#0e2b4a]">Become a Partner</h2>
-          <p className="text-slate-500 text-sm mt-2">Start earning commissions today.</p>
+    <div className="relative flex items-center justify-center w-full h-screen overflow-hidden bg-white">
+      {/* Background Blurred Gradient Shapes */}
+      <div 
+        className="absolute pointer-events-none"
+        style={{
+          width: '900px',
+          height: '900px',
+          left: '-400px',
+          bottom: '-300px',
+          filter: 'blur(120px)',
+          zIndex: 0
+        }}
+      >
+        <div 
+          className="absolute rounded-full"
+          style={{ width: '700px', height: '700px', left: '150px', top: '0px', background: '#011C39' }}
+        />
+        <div 
+          className="absolute rounded-full"
+          style={{ width: '700px', height: '700px', left: '80px', top: '150px', background: '#00D1A0' }}
+        />
+        <div 
+          className="absolute rounded-full"
+          style={{ width: '700px', height: '700px', left: '0px', top: '120px', background: '#F7F9FC' }}
+        />
+      </div>
+
+      {/* Main Content */}
+      <div className="relative z-10 flex items-center justify-between w-full max-w-[1600px] px-20 lg:px-32 xl:px-48">
+        
+        {/* LEFT SIDE - Image */}
+        <div className="hidden lg:block flex-shrink-0">
+          <img 
+            src="/LoginImage.png" 
+            alt="Register Visual" 
+            className="object-cover rounded-[32px]"
+            style={{ width: '420px', height: '580px' }}
+          />
         </div>
 
-        <form onSubmit={handleSubmit} className="p-8 space-y-4 pt-4">
-          {error && (
-            <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 text-center font-medium">
-              {error}
+        {/* RIGHT SIDE - Form Section */}
+        <div className="flex flex-col items-center w-full max-w-[440px]">
+          
+          {/* Logo Section */}
+          <div className="flex items-center gap-2.5 mb-6">
+            <img 
+              src="/logo_writeoffgenie.png" 
+              alt="WriteOffGenie Logo" 
+              className="w-10 h-12"
+            />
+            <div className="flex flex-col">
+              <h1 className="text-2xl font-bold tracking-tight text-[#011C39] leading-tight">
+                WriteOffGenie
+              </h1>
+              <p className="text-xs font-medium text-[#011C39]/80">
+                Never miss a potential write-off.
+              </p>
             </div>
-          )}
+          </div>
 
-          <InputGroup icon={User} name="name" placeholder="Full Name" onChange={handleChange} />
-          <InputGroup icon={Mail} name="email" type="email" placeholder="Email Address" onChange={handleChange} />
-          <InputGroup icon={Phone} name="phone" placeholder="Phone Number" onChange={handleChange} />
-          <InputGroup icon={Briefcase} name="caRegNumber" placeholder="CA Reg Number (Optional)" onChange={handleChange} required={false} />
-          <InputGroup icon={Lock} name="password" type="password" placeholder="Password (Min 8 chars)" onChange={handleChange} />
+          {/* Form Card */}
+          <div className="flex flex-col items-center w-full">
+            
+            {/* Header */}
+            <div className="text-center mb-4">
+              <h2 className="text-xl font-semibold text-[#111111] mb-0.5">
+                Become a Partner
+              </h2>
+              <p className="text-xs text-[#9499A1]">
+                Sign up to start earning commissions today
+              </p>
+            </div>
 
-          <button disabled={loading} className="w-full bg-[#0e2b4a] hover:bg-[#1a3d61] text-white font-bold py-3.5 rounded-xl transition-all shadow-lg flex justify-center items-center gap-2 mt-4">
-            {loading ? <Loader2 className="animate-spin" size={20} /> : <>Create Account <ArrowRight size={18} /></>}
-          </button>
-        </form>
+            {/* Form */}
+            <form onSubmit={handleSubmit} className="flex flex-col w-full gap-2.5">
+              {error && (
+                <div className="w-full p-2.5 text-sm rounded-lg text-center font-medium bg-red-50 border border-red-200 text-red-500">
+                  {error}
+                </div>
+              )}
 
-        <div className="bg-slate-50 px-8 py-5 text-center border-t border-slate-100">
-          <p className="text-sm text-slate-600">
-            Already registered? <Link to="/login" className="text-[#0e2b4a] font-bold hover:underline">Sign In</Link>
-          </p>
+              {/* Full Name Field */}
+              <div className="flex flex-col gap-0.5">
+                <label className="text-xs font-medium text-[#111111]">Full Name</label>
+                <input 
+                  type="text" 
+                  name="name"
+                  placeholder="Enter your full name" 
+                  className="w-full px-3 py-2 text-sm text-[#111111] bg-white border border-[#E3E6EA] rounded-lg outline-none focus:border-[#011C39] transition-colors"
+                  value={form.name}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+
+              {/* Email Field */}
+              <div className="flex flex-col gap-0.5">
+                <label className="text-xs font-medium text-[#111111]">Email Address</label>
+                <input 
+                  type="email" 
+                  name="email"
+                  placeholder="Enter your work email" 
+                  className="w-full px-3 py-2 text-sm text-[#111111] bg-white border border-[#E3E6EA] rounded-lg outline-none focus:border-[#011C39] transition-colors"
+                  value={form.email}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+
+              {/* Phone Field */}
+              <div className="flex flex-col gap-0.5">
+                <label className="text-xs font-medium text-[#111111]">Phone Number</label>
+                <input 
+                  type="tel" 
+                  name="phone"
+                  placeholder="Enter your phone number" 
+                  className="w-full px-3 py-2 text-sm text-[#111111] bg-white border border-[#E3E6EA] rounded-lg outline-none focus:border-[#011C39] transition-colors"
+                  value={form.phone}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+
+              {/* CA Registration Number Field */}
+              <div className="flex flex-col gap-0.5">
+                <label className="text-xs font-medium text-[#111111]">
+                  CA Reg Number <span className="text-[#9499A1]">(Optional)</span>
+                </label>
+                <input 
+                  type="text" 
+                  name="caRegNumber"
+                  placeholder="Enter your CA registration number" 
+                  className="w-full px-3 py-2 text-sm text-[#111111] bg-white border border-[#E3E6EA] rounded-lg outline-none focus:border-[#011C39] transition-colors"
+                  value={form.caRegNumber}
+                  onChange={handleChange}
+                />
+              </div>
+
+              {/* Password Field */}
+              <div className="flex flex-col gap-0.5">
+                <label className="text-xs font-medium text-[#111111]">Password</label>
+                <input 
+                  type="password" 
+                  name="password"
+                  placeholder="Create a password (min 8 characters)" 
+                  className="w-full px-3 py-2 text-sm text-[#111111] bg-white border border-[#E3E6EA] rounded-lg outline-none focus:border-[#011C39] transition-colors"
+                  value={form.password}
+                  onChange={handleChange}
+                  required
+                  minLength={8}
+                />
+              </div>
+
+              {/* Register Button */}
+              <button 
+                disabled={loading} 
+                type="submit"
+                className="w-full py-2.5 mt-2 text-sm font-semibold text-white bg-[#011C39] rounded-lg hover:bg-[#022a55] transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
+              >
+                {loading ? <Loader2 className="animate-spin" size={18} /> : "Create Account"}
+              </button>
+            </form>
+
+            {/* Sign In Section */}
+            <div className="flex flex-col items-center w-full mt-4 pt-3 border-t border-gray-100">
+              <p className="text-xs text-[#9499A1] mb-1.5">
+                Already have an account?
+              </p>
+              <Link 
+                to="/login"
+                className="w-full py-2 text-sm font-semibold text-[#011C39] bg-transparent border-2 border-[#011C39] rounded-lg hover:bg-[#011C39] hover:text-white transition-colors text-center"
+              >
+                Sign In
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
     </div>

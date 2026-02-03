@@ -2,10 +2,10 @@ import { useState, useEffect } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { httpsCallable } from "firebase/functions";
 import { 
-  User, Mail, Lock, Phone, Ticket, Loader2, ArrowRight, CheckCircle 
+  User, Mail, Lock, Phone, Ticket, Loader2, ArrowRight, CheckCircle, CreditCard 
 } from "lucide-react";
-import { functions } from "../../services/firebase";
-import InputGroup from "../../components/InputGroup";
+import { functions } from "../../services/firebase"; // Ensure this matches your project path
+import InputGroup from "../../components/InputGroup"; // Ensure this component exists
 
 function ClientRegister() {
   const [searchParams] = useSearchParams();
@@ -16,6 +16,9 @@ function ClientRegister() {
     phone: "",
     referralCode: "",
   });
+  
+  // New State for Subscription Toggle
+  const [subscribeNow, setSubscribeNow] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -37,10 +40,14 @@ function ClientRegister() {
 
     try {
       const registerFn = httpsCallable(functions, "registerClient");
-      await registerFn(form);
-      setSuccess(true);
       
-      // Clear sensitive fields
+      // Sending 'paymentSuccess' based on the checkbox state
+      await registerFn({ 
+        ...form, 
+        paymentSuccess: subscribeNow 
+      });
+      
+      setSuccess(true);
       setForm((prev) => ({ ...prev, password: "", name: "", email: "", phone: "" }));
     } catch (err) {
       console.error(err);
@@ -116,6 +123,31 @@ function ClientRegister() {
                 value={form.password} 
                 onChange={handleChange} 
               />
+
+              {/* TEST SUBSCRIPTION TOGGLE */}
+              <div 
+                className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex items-start gap-3 ${
+                  subscribeNow 
+                    ? "bg-indigo-50 border-indigo-600" 
+                    : "bg-slate-50 border-slate-200 hover:border-slate-300"
+                }`}
+                onClick={() => setSubscribeNow(!subscribeNow)}
+              >
+                <div className={`mt-0.5 w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${
+                  subscribeNow ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white border-slate-300"
+                }`}>
+                  {subscribeNow && <CheckCircle size={14} strokeWidth={3} />}
+                </div>
+                <div>
+                  <h4 className={`text-sm font-bold ${subscribeNow ? "text-indigo-900" : "text-slate-700"}`}>
+                    Subscribe to Standard Plan
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Pay ₹1000 now for full access. (Simulated Payment)
+                  </p>
+                </div>
+                <CreditCard className={`ml-auto ${subscribeNow ? "text-indigo-600" : "text-slate-400"}`} size={20} />
+              </div>
 
               <button
                 disabled={loading}

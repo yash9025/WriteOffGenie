@@ -24,13 +24,6 @@ function Navbar({ user, role }) {
     <nav className={`${navClasses} z-50 transition-all duration-300`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-24 items-center">
-          
-          <Link to="/" className="flex items-center gap-3 hover:opacity-90 transition-opacity">
-            <Sparkles className="text-white h-7 w-7" strokeWidth={1.5} />
-            <span className="text-2xl font-bold text-white tracking-tight">
-              WriteOffGenie
-            </span>
-          </Link>
 
           <div className="hidden md:flex items-center space-x-8">
             {user ? (

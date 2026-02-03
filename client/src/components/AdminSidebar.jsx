@@ -1,58 +1,37 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { 
-  LayoutDashboard, Users, Wallet, 
-  LogOut, Menu, X, Activity, User, Search
+  LayoutDashboard, Users, TrendingUp, Wallet, LogOut, Menu, X
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import { useSearch } from "../context/SearchContext";
 
-// --- SIDEBAR ITEM COMPONENT ---
-const SidebarItem = ({ icon: Icon, label, path, active, onClick }) => (
+const AdminSidebarItem = ({ icon: Icon, label, path, active, onClick }) => (
   <Link
     to={path}
     onClick={onClick}
-    className={`flex items-center gap-2 px-5 py-3 rounded-xl transition-all duration-200 w-full ${
+    className={`flex items-center gap-3 px-5 py-3 rounded-xl transition-all duration-200 w-full ${
       active 
         ? "bg-[#F7F9FC] text-[#111111]" 
         : "text-[#111111] opacity-50 hover:opacity-100 hover:bg-[#F7F9FC]"
     }`}
   >
-    <Icon size={24} strokeWidth={1.5} />
+    <Icon size={24} strokeWidth={active ? 1.8 : 1.5} />
     <span className="text-base font-normal">{label}</span>
   </Link>
 );
 
-export default function SidebarLayout({ children }) {
+export default function AdminSidebar({ children }) {
   const [isOpen, setIsOpen] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
-  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const { pathname } = useLocation();
-  const { logout, user } = useAuth();
+  const { logout } = useAuth();
   const navigate = useNavigate();
-  const { searchQuery, setSearchQuery, clearSearch } = useSearch();
-
-  // Clear search when route changes
-  useEffect(() => {
-    clearSearch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
-
-  // Get placeholder text based on current page
-  const getSearchPlaceholder = () => {
-    if (pathname.includes("referrals")) return "Search referrals by name or email...";
-    if (pathname.includes("performance")) return "Search by user or plan...";
-    if (pathname.includes("payouts")) return "Search withdrawals...";
-    if (pathname.includes("profile")) return "Search settings...";
-    return "Search here...";
-  };
 
   const menuItems = [
-    { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
-    { icon: Users, label: "Referred Users", path: "/my-referrals" },
-    { icon: Activity, label: "Earnings & Commission", path: "/performance" },
-    { icon: Wallet, label: "Wallet & Withdrawals", path: "/payouts" },
-    { icon: User, label: "Profile", path: "/profile" },
+    { icon: LayoutDashboard, label: "Dashboard", path: "/admin/dashboard" },
+    { icon: Users, label: "CA Management", path: "/admin/cas" },
+    { icon: TrendingUp, label: "Earnings & Revenue", path: "/admin/earnings" },
+    { icon: Wallet, label: "Withdrawals", path: "/admin/withdrawals" },
   ];
 
   const handleLogout = async () => {
@@ -107,7 +86,7 @@ export default function SidebarLayout({ children }) {
         {/* Navigation */}
         <nav className="flex-1 px-4 space-y-4">
           {menuItems.map((item) => (
-            <SidebarItem 
+            <AdminSidebarItem 
               key={item.path} 
               {...item} 
               active={pathname === item.path}
@@ -120,7 +99,7 @@ export default function SidebarLayout({ children }) {
         <div className="p-4">
           <button 
             onClick={() => setShowLogoutModal(true)}
-            className="flex items-center gap-2 px-5 py-3 w-full text-[#111111] opacity-50 hover:opacity-100 hover:bg-red-50 rounded-xl transition-all"
+            className="flex items-center gap-3 px-5 py-3 w-full text-[#111111] opacity-50 hover:opacity-100 hover:bg-red-50 rounded-xl transition-all"
           >
             <LogOut size={24} strokeWidth={1.5} />
             <span className="text-base font-normal">Logout</span>
@@ -131,77 +110,26 @@ export default function SidebarLayout({ children }) {
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         {/* Top Navbar */}
-        <header className="bg-white border-b border-[#E3E6EA] px-4 md:px-6 py-4 flex items-center justify-between gap-4">
-          {/* Search Bar - Desktop */}
-          <div className="hidden md:flex items-center gap-2.5 px-4 py-3 border border-[#E2E6EA] rounded-full flex-1 max-w-[440px]">
-            <Search size={20} className="text-[#9D9D9D] flex-shrink-0" />
-            <input 
-              type="text" 
-              placeholder={getSearchPlaceholder()}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="flex-1 text-base text-[#111111] placeholder:text-[#9D9D9D] outline-none bg-transparent min-w-0"
-            />
-            {searchQuery && (
-              <button 
-                onClick={clearSearch}
-                className="text-[#9D9D9D] hover:text-[#111111] transition-colors flex-shrink-0"
-              >
-                <X size={18} />
-              </button>
-            )}
-          </div>
-
-          {/* Mobile: Logo + Search Toggle */}
-          <div className="flex md:hidden items-center gap-3 flex-1">
-            <span className="text-[#011C39] font-bold text-lg">WriteOffGenie</span>
-            <button 
-              onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
-              className="p-2 text-[#9D9D9D] hover:text-[#111111] transition-colors"
-            >
-              <Search size={20} />
-            </button>
-          </div>
+        <header className="bg-white border-b border-[#E3E6EA] px-4 md:px-6 py-4 flex items-center justify-between flex-shrink-0">
+          {/* Search Bar - with left margin on mobile for hamburger menu */}
+          <input 
+            type="text" 
+            placeholder="Search here..."
+            className="flex items-center gap-2.5 px-4 py-3 border border-[#E2E6EA] rounded-full flex-1 max-w-[440px] text-base text-[#111111] placeholder:text-[#9D9D9D] outline-none bg-white ml-14 lg:ml-0"
+          />
 
           {/* User Profile */}
-          <div className="flex items-center gap-3 bg-[#F7F9FC] px-2 py-1.5 rounded-full cursor-pointer hover:bg-[#E3E6EA] transition-all flex-shrink-0">
+          <div className="flex items-center gap-3 bg-[#F7F9FC] px-3 py-1.5 rounded-full ml-4">
             <div className="h-10 w-10 rounded-full bg-[#011C39] flex items-center justify-center text-white font-bold text-sm">
-              {user?.displayName?.[0]?.toUpperCase() || 'CA'}
+              A
             </div>
-            <span className="text-base text-[#111111] pr-2 hidden sm:block">
-              {user?.displayName || 'CA Partner'}
-            </span>
+            <span className="text-base text-[#111111] pr-2 hidden sm:block">Admin</span>
           </div>
         </header>
 
-        {/* Mobile Search Bar - Expandable */}
-        {mobileSearchOpen && (
-          <div className="md:hidden bg-white border-b border-[#E3E6EA] px-4 py-3 animate-in slide-in-from-top duration-200">
-            <div className="flex items-center gap-2.5 px-4 py-3 border border-[#E2E6EA] rounded-full bg-[#F7F9FC]">
-              <Search size={20} className="text-[#9D9D9D] flex-shrink-0" />
-              <input 
-                type="text" 
-                placeholder={getSearchPlaceholder()}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                autoFocus
-                className="flex-1 text-base text-[#111111] placeholder:text-[#9D9D9D] outline-none bg-transparent min-w-0"
-              />
-              {searchQuery && (
-                <button 
-                  onClick={clearSearch}
-                  className="text-[#9D9D9D] hover:text-[#111111] transition-colors flex-shrink-0"
-                >
-                  <X size={18} />
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto bg-white">
-          <div className="p-6">
+          <div className="p-6 h-full">
             {children}
           </div>
         </div>
@@ -212,7 +140,6 @@ export default function SidebarLayout({ children }) {
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
           <div className="bg-white rounded-[20px] p-8 w-full max-w-[400px] shadow-2xl animate-in fade-in zoom-in duration-200 relative">
             
-            {/* Close Icon */}
             <button 
               onClick={() => setShowLogoutModal(false)}
               className="absolute top-4 right-4 text-black bg-black/10 rounded-full p-1 hover:bg-black/20 transition-colors"
@@ -244,7 +171,6 @@ export default function SidebarLayout({ children }) {
           </div>
         </div>
       )}
-
     </div>
   );
 }

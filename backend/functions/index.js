@@ -19,7 +19,7 @@ import {
     toggleCAStatus as toggleCAStatusLogic, 
     processWithdrawal as processWithdrawalLogic 
 } from "./controllers/adminController.js";
-
+import { sendReferralInvite } from "./controllers/emailController.js";
 // For cost control...
 setGlobalOptions({ maxInstances: 10 });
 
@@ -50,4 +50,10 @@ export const toggleCAStatus = onCall(async (request) => {
 
 export const processWithdrawal = onCall(async (request) => {
     return await processWithdrawalLogic(request.data, request);
+});
+
+// EMAIL CONTROLLER
+
+export const sendReferralInvite = onCall(async (request) => {
+    return await sendReferralInvite(request.data, request);
 });

@@ -1,300 +1,241 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { collection, query, where, getDocs } from "firebase/firestore";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
-import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  BarChart, Bar
-} from "recharts";
-import { TrendingUp, Loader2, Award, Target, Calendar, DollarSign, ChevronDown, Medal } from "lucide-react";
+import { Loader2, ChevronDown } from "lucide-react";
+import {RevenueIcon, SubscriptionIcon, CalendarIcon, EmptyPerformanceIllustration as EmptyIllustration } from "../../components/Icons";
 
-// --- HELPERS ---
-const getDateRange = (range) => {
-  const now = new Date();
-  const start = new Date();
-  if (range === 'day') start.setHours(0,0,0,0);
-  if (range === '7d') start.setDate(now.getDate() - 7);
-  if (range === '30d') start.setDate(now.getDate() - 30);
-  if (range === 'month') start.setDate(1); // Start of this month
-  if (range === 'year') start.setFullYear(now.getFullYear() - 1);
-  return start;
-};
-
-const CustomTooltip = ({ active, payload, label }) => {
-  if (!active || !payload || !payload.length) return null;
-  return (
-    <div className="bg-slate-900 text-white border border-slate-800 rounded-xl shadow-xl p-3 text-xs">
-      <p className="font-bold text-slate-400 mb-1">{label}</p>
-      <p className="text-base font-black text-white">₹{payload[0].value.toLocaleString()}</p>
+// --- STAT CARD ---
+const StatCard = ({ icon: Icon, label, value, description }) => (
+  <div className="bg-white border border-[#E3E6EA] rounded-2xl p-5 flex flex-col gap-4 flex-1 min-w-0 shadow-sm">
+    <div className="flex items-center justify-between w-full">
+      <p className="text-[#9499A1] text-sm font-medium">{label}</p>
+      <div className="bg-[rgba(77,124,254,0.1)] p-2 rounded-full">
+        <Icon />
+      </div>
     </div>
-  );
-};
+    <div className="flex flex-col gap-1">
+      <p className="text-[#111111] text-3xl font-bold tracking-tight">{value}</p>
+      <p className="text-[#9499A1] text-[11px] leading-tight">{description}</p>
+    </div>
+  </div>
+);
 
 export default function Performance() {
   const { user } = useAuth();
-  const [rawData, setRawData] = useState([]);
+  const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState('year'); // day, 7d, 30d, month, year
+  const [timeRange, setTimeRange] = useState('month');
+  const [filterOpen, setFilterOpen] = useState(false);
 
   useEffect(() => {
-    const fetchData = async () => {
-      if (!user) return;
-      try {
-        const q = query(collection(db, "Clients"), where("referredBy", "==", user.uid));
-        const snap = await getDocs(q);
-        
-        // Store raw transactions with valid dates
-        const transactions = snap.docs.map(d => {
-            const data = d.data();
-            return {
-                amount: (data.subscription?.amountPaid || 0) * 0.10, // 10% Commission
-                date: data.createdAt?.toDate() || new Date()
-            };
-        });
-        setRawData(transactions);
-      } catch (e) { console.error(e); } 
-      finally { setLoading(false); }
-    };
-    fetchData();
+    if (!user) return;
+
+    const q = query(collection(db, "Clients"), where("referredBy", "==", user.uid));
+    const unsubClients = onSnapshot(q, (snap) => {
+      const clientsData = snap.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          email: data.email,
+          name: data.name,
+          planType: data.subscription?.planType || "Free Plan",
+          amountPaid: data.subscription?.amountPaid || 0,
+          commission: (data.subscription?.amountPaid || 0) * 0.10,
+          activatedAt: data.subscription?.activatedAt?.toDate() || data.createdAt?.toDate() || new Date(),
+          subscriptionStatus: data.subscription?.status || "inactive"
+        };
+      });
+      setClients(clientsData);
+      setLoading(false);
+    });
+
+    return () => unsubClients();
   }, [user]);
 
-  // --- 1. FILTER & GROUP DATA ---
-  const chartData = useMemo(() => {
-    const startDate = getDateRange(timeRange);
-    const filtered = rawData.filter(t => t.date >= startDate);
+  // Filter Logic
+  const filteredClients = useMemo(() => {
+    const now = new Date();
+    const startDate = new Date();
     
-    // Dynamic Grouping
-    const grouped = {};
-    filtered.forEach(t => {
-        let key;
-        if (timeRange === 'day') {
-            key = t.date.toLocaleTimeString([], { hour: '2-digit', hour12: true }); // "2 PM"
-        } else if (timeRange === '7d' || timeRange === '30d' || timeRange === 'month') {
-            key = t.date.toLocaleDateString('en-US', { day: 'numeric', month: 'short' }); // "24 Jan"
-        } else {
-            key = t.date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }); // "Jan 24"
-        }
-        
-        grouped[key] = (grouped[key] || 0) + t.amount;
-    });
-
-    // Convert to Array & Sort chronologically if needed (Keys are usually sorted by insertion in JS object for simple strings, but explicit sort is safer)
-    return Object.entries(grouped).map(([name, amount]) => ({ name, amount }));
-  }, [rawData, timeRange]);
-
-  // --- 2. CALCULATE STATS ---
-  const stats = useMemo(() => {
-    const total = rawData.reduce((sum, t) => sum + t.amount, 0);
-    const bestMonthVal = Math.max(...chartData.map(d => d.amount), 0);
-    const avg = chartData.length ? total / chartData.length : 0;
+    if (timeRange === 'week') startDate.setDate(now.getDate() - 7);
+    else if (timeRange === 'month') startDate.setMonth(now.getMonth() - 1);
+    else if (timeRange === 'year') startDate.setFullYear(now.getFullYear() - 1);
     
-    // Growth Logic (Last period vs Previous)
-    let growth = 0;
-    if (chartData.length >= 2) {
-        const curr = chartData[chartData.length - 1].amount;
-        const prev = chartData[chartData.length - 2].amount;
-        growth = prev > 0 ? ((curr - prev) / prev) * 100 : 0;
-    }
+    return clients.filter(c => c.amountPaid > 0 && c.activatedAt >= startDate);
+  }, [clients, timeRange]);
 
-    return { total, best: bestMonthVal, avg, growth };
-  }, [rawData, chartData]);
+  // Stats Calculation
+  const totalEarnings = useMemo(() => {
+    return clients.filter(c => c.amountPaid > 0).reduce((sum, c) => sum + c.commission, 0);
+  }, [clients]);
 
-  // --- 3. TOP MONTHS LOGIC (Always calculate from ALL data for global ranking) ---
-  const topMonths = useMemo(() => {
-    const groupedAll = {};
-    rawData.forEach(t => {
-        const key = t.date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-        groupedAll[key] = (groupedAll[key] || 0) + t.amount;
-    });
-    return Object.entries(groupedAll)
-        .map(([name, amount]) => ({ name, amount }))
-        .sort((a, b) => b.amount - a.amount)
-        .slice(0, 5);
-  }, [rawData]);
+  const thisMonthEarnings = useMemo(() => {
+    return filteredClients.reduce((sum, c) => sum + c.commission, 0);
+  }, [filteredClients]);
 
+  const activeSubscriptions = useMemo(() => {
+    return clients.filter(c => c.subscriptionStatus === 'active').length;
+  }, [clients]);
+
+  const filterOptions = [
+    { value: "week", label: "This week" },
+    { value: "month", label: "This month" },
+    { value: "year", label: "This year" }
+  ];
 
   if (loading) return (
     <div className="h-[80vh] flex flex-col items-center justify-center gap-4">
-      <Loader2 className="animate-spin text-indigo-600" size={48} />
-      <p className="text-sm font-medium text-slate-500">Crunching numbers...</p>
+      <Loader2 className="animate-spin text-[#00D1A0]" size={40} strokeWidth={2.5} />
+      <p className="text-sm font-medium text-[#9499A1]">Loading earnings...</p>
     </div>
   );
 
+  const earningsData = clients.filter(c => c.amountPaid > 0);
+
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
+    <div className="flex flex-col gap-6 w-full max-w-full animate-in fade-in duration-500 pb-10">
       
       {/* Header & Filter */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+      <div className="flex items-center justify-between">
         <div>
-          <div className="flex items-center gap-2 mb-2">
-            <div className="h-1 w-8 bg-indigo-600 rounded-full" />
-            <span className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Analytics</span>
-          </div>
-          <h1 className="text-3xl font-bold text-slate-900 mb-1">Performance Overview</h1>
-          <p className="text-slate-600">Track your referral revenue and growth metrics</p>
+          <h1 className="text-[#111111] text-2xl font-bold tracking-tight">Earnings & Commission</h1>
+          <p className="text-[#9499A1] text-sm mt-1">View commission earned from your referred subscriptions</p>
         </div>
 
-        <div className="bg-white p-1 rounded-xl border border-slate-200 shadow-sm flex overflow-x-auto">
-          {['day', '7d', '30d', 'month', 'year'].map((key) => (
+        <div className="flex items-center gap-3">
+          <span className="text-[#9499A1] text-sm font-medium hidden sm:block">Filter by period</span>
+          <div className="relative">
             <button
-              key={key}
-              onClick={() => setTimeRange(key)}
-              className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wide transition-all whitespace-nowrap ${
-                timeRange === key 
-                ? 'bg-slate-900 text-white shadow-md' 
-                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
-              }`}
+              onClick={() => setFilterOpen(!filterOpen)}
+              className="border border-[#E3E6EA] rounded-lg px-3 py-2 flex items-center gap-2 bg-white hover:bg-gray-50 transition-colors cursor-pointer"
             >
-              {key === 'day' ? 'Today' : key === 'year' ? 'Year' : key.toUpperCase()}
+              <span className="text-[#111111] text-sm font-medium">
+                {filterOptions.find(f => f.value === timeRange)?.label}
+              </span>
+              <ChevronDown size={16} className="text-[#9499A1]" />
             </button>
-          ))}
-        </div>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 hover:shadow-lg transition-all group">
-          <div className="flex justify-between items-start mb-4">
-            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl group-hover:scale-110 transition-transform"><DollarSign size={24} /></div>
-            <span className="bg-indigo-50 text-indigo-700 px-2 py-1 rounded text-[10px] font-bold uppercase">All Time</span>
-          </div>
-          <p className="text-3xl font-bold text-slate-900">₹{stats.total.toLocaleString()}</p>
-          <p className="text-sm text-slate-500 font-medium mt-1">Total Revenue</p>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 hover:shadow-lg transition-all group">
-          <div className="flex justify-between items-start mb-4">
-            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl group-hover:scale-110 transition-transform"><Award size={24} /></div>
-            <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-[10px] font-bold uppercase">Peak</span>
-          </div>
-          <p className="text-3xl font-bold text-emerald-600">₹{stats.best.toLocaleString()}</p>
-          <p className="text-sm text-slate-500 font-medium mt-1">Best Period</p>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 hover:shadow-lg transition-all group">
-          <div className="flex justify-between items-start mb-4">
-            <div className="p-3 bg-violet-50 text-violet-600 rounded-xl group-hover:scale-110 transition-transform"><Calendar size={24} /></div>
-            <span className="bg-violet-50 text-violet-700 px-2 py-1 rounded text-[10px] font-bold uppercase">Avg</span>
-          </div>
-          <p className="text-3xl font-bold text-violet-600">₹{Math.round(stats.avg).toLocaleString()}</p>
-          <p className="text-sm text-slate-500 font-medium mt-1">Daily Average</p>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 hover:shadow-lg transition-all group">
-          <div className="flex justify-between items-start mb-4">
-            <div className="p-3 bg-amber-50 text-amber-600 rounded-xl group-hover:scale-110 transition-transform"><TrendingUp size={24} /></div>
-            <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${stats.growth >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
-                {stats.growth >= 0 ? '+' : ''}{stats.growth.toFixed(1)}%
-            </span>
-          </div>
-          <p className="text-3xl font-bold text-slate-900">{stats.growth >= 0 ? 'Growing' : 'Downtrend'}</p>
-          <p className="text-sm text-slate-500 font-medium mt-1">Vs Previous</p>
-        </div>
-      </div>
-
-      {/* Main Grid */}
-      <div className="grid lg:grid-cols-3 gap-8">
-        
-        {/* Chart */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-8 shadow-sm">
-          <div className="flex items-center justify-between mb-8">
-            <div>
-              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <TrendingUp className="text-indigo-600" size={20} /> Revenue Trend
-              </h3>
-              <p className="text-sm text-slate-500 mt-1">Earnings over the selected period</p>
-            </div>
-          </div>
-          
-          <div className="h-80 w-full">
-            {chartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData}>
-                  <defs>
-                    <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.2}/>
-                      <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis 
-                    dataKey="name" 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{fill: '#64748b', fontSize: 11, fontWeight: 600}} 
-                    dy={10} 
-                  />
-                  <YAxis 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{fill: '#64748b', fontSize: 11, fontWeight: 600}} 
-                    tickFormatter={(value) => `₹${(value/1000).toFixed(0)}k`}
-                  />
-                  <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#cbd5e1', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                  <Area 
-                    type="monotone" 
-                    dataKey="amount" 
-                    stroke="#4f46e5" 
-                    strokeWidth={3} 
-                    fillOpacity={1} 
-                    fill="url(#colorRevenue)" 
-                    activeDot={{r: 6, strokeWidth: 0, fill: '#312e81'}}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-slate-400">
-                <p>No data for this period</p>
+            
+            {filterOpen && (
+              <div className="absolute top-full mt-2 right-0 bg-white border border-[#E3E6EA] rounded-lg shadow-lg z-10 w-[140px] overflow-hidden">
+                {filterOptions.map(option => (
+                  <button
+                    key={option.value}
+                    onClick={() => {
+                      setTimeRange(option.value);
+                      setFilterOpen(false);
+                    }}
+                    className={`w-full px-4 py-2.5 text-left text-sm font-medium hover:bg-gray-50 transition-colors ${
+                      timeRange === option.value ? 'text-[#00D1A0] bg-[rgba(0,209,160,0.05)]' : 'text-[#111111]'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
               </div>
             )}
           </div>
         </div>
+      </div>
 
-        {/* Enhanced Top Months (Leaderboard Style) */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-0 overflow-hidden shadow-sm flex flex-col">
-          <div className="p-6 border-b border-slate-100 bg-slate-50/50">
-            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-              <Medal className="text-amber-500" size={20} /> Monthly Hall of Fame
-            </h3>
-          </div>
-          
-          <div className="flex-1 overflow-y-auto p-4 space-y-2">
-            {topMonths.length === 0 ? (
-              <div className="h-40 flex items-center justify-center text-slate-400 text-sm">No records yet</div>
-            ) : (
-              topMonths.map((item, idx) => (
-                <div key={idx} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-colors group cursor-default">
-                  <div className="flex items-center gap-4">
-                    <div className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center text-xs font-bold shadow-sm transition-transform group-hover:scale-105 ${
-                      idx === 0 ? 'bg-amber-100 text-amber-700' : 
-                      idx === 1 ? 'bg-slate-200 text-slate-700' : 
-                      idx === 2 ? 'bg-orange-100 text-orange-700' : 
-                      'bg-slate-50 text-slate-500'
-                    }`}>
-                      <span className="text-[10px] opacity-60 uppercase">Rank</span>
-                      <span className="text-base leading-none">#{idx + 1}</span>
-                    </div>
-                    <div>
-                      <p className="text-sm font-bold text-slate-900">{item.name}</p>
-                      <div className="h-1.5 w-16 bg-slate-100 rounded-full mt-1 overflow-hidden">
-                         <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${(item.amount / topMonths[0].amount) * 100}%` }}></div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-slate-900">₹{item.amount.toLocaleString()}</p>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Revenue</p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-          <div className="p-4 bg-slate-50 text-center border-t border-slate-100">
-             <p className="text-xs text-slate-400 font-medium">Rankings based on all-time data</p>
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <StatCard 
+          icon={RevenueIcon} 
+          label="Total Earnings" 
+          value={`$${totalEarnings.toFixed(2)}`}
+          description="Total commission earned from all referrals"
+        />
+        <StatCard 
+          icon={CalendarIcon} 
+          label="Period Earnings" 
+          value={`$${thisMonthEarnings.toFixed(2)}`}
+          description="Commission earned in the selected period"
+        />
+        <StatCard 
+          icon={SubscriptionIcon} 
+          label="Active Subscriptions" 
+          value={activeSubscriptions}
+          description="Active subscriptions linked to your referrals"
+        />
+      </div>
+
+      {/* Table Section */}
+      {earningsData.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 bg-white border border-[#E3E6EA] rounded-2xl">
+          <EmptyIllustration />
+          <div className="flex flex-col gap-2 items-center text-center mt-6">
+            <h3 className="text-[#111111] text-lg font-bold">No earnings yet</h3>
+            <p className="text-[#9499A1] text-sm max-w-xs">
+              You'll see commission details here once users subscribe using your referral link.
+            </p>
           </div>
         </div>
+      ) : (
+        <div className="bg-white border border-[#E3E6EA] rounded-2xl p-6 flex flex-col gap-5 shadow-sm">
+          
+          {/* Table Header */}
+          <div className="hidden md:flex items-center text-[#9499A1] text-xs font-medium uppercase tracking-wider pb-3 border-b border-[#E3E6EA]">
+            <p className="w-1/4">User</p>
+            <p className="w-1/5">Plan</p>
+            <p className="w-1/6">Amount</p>
+            <p className="w-1/6">Commission (10%)</p>
+            <p className="w-1/6">Credited On</p>
+            <p className="w-1/12 text-right">Status</p>
+          </div>
 
-      </div>
+          {/* Table Rows */}
+          <div className="flex flex-col gap-2">
+            {earningsData.map((item) => {
+              const dateStr = item.activatedAt.toLocaleDateString('en-US', { 
+                month: 'short', day: 'numeric', year: 'numeric' 
+              });
+              const isCredited = item.subscriptionStatus === 'active';
+
+              return (
+                <div key={item.id} className="flex flex-col md:flex-row md:items-center justify-between p-3 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-[#E3E6EA]">
+                  
+                  {/* Mobile Label included for responsiveness */}
+                  <div className="w-full md:w-1/4 mb-2 md:mb-0">
+                    <p className="text-[#111111] text-sm font-medium truncate" title={item.email}>{item.email}</p>
+                  </div>
+
+                  <div className="w-full md:w-1/5 mb-2 md:mb-0 flex justify-between md:block">
+                    <span className="md:hidden text-xs text-[#9499A1]">Plan:</span>
+                    <p className="text-[#111111] text-sm">{item.planType}</p>
+                  </div>
+
+                  <div className="w-full md:w-1/6 mb-2 md:mb-0 flex justify-between md:block">
+                    <span className="md:hidden text-xs text-[#9499A1]">Amount:</span>
+                    <p className="text-[#111111] text-sm font-medium">${item.amountPaid.toFixed(2)}</p>
+                  </div>
+
+                  <div className="w-full md:w-1/6 mb-2 md:mb-0 flex justify-between md:block">
+                    <span className="md:hidden text-xs text-[#9499A1]">Comm:</span>
+                    <p className="text-[#011C39] text-sm font-bold">${item.commission.toFixed(2)}</p>
+                  </div>
+
+                  <div className="w-full md:w-1/6 mb-2 md:mb-0 flex justify-between md:block">
+                    <span className="md:hidden text-xs text-[#9499A1]">Date:</span>
+                    <p className="text-[#9499A1] text-sm">{dateStr}</p>
+                  </div>
+
+                  <div className="w-full md:w-1/12 text-left md:text-right">
+                    <span className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${
+                      isCredited 
+                        ? "bg-[#ECFDF5] text-[#059669] border border-[#A7F3D0]" 
+                        : "bg-[#FFFBEB] text-[#D97706] border border-[#FDE68A]"
+                    }`}>
+                      {isCredited ? "Credited" : "Pending"}
+                    </span>
+                  </div>
+
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
