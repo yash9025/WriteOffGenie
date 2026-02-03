@@ -4,13 +4,12 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../services/firebase";
 import toast, { Toaster } from "react-hot-toast";
 import { 
-  Loader2, Download, X, Search,
-  CheckCircle2, Clock, XCircle, AlertCircle, 
-  Wallet, Building2, CreditCard, User, 
-  RefreshCcw // Keeping Lucide icons used in logic/buttons
+  Loader2, X, Search,
+  Wallet, Building2, User
 } from "lucide-react";
 
 
+// --- CUSTOM ICONS ---
 export const RevenueIcon = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
     <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -43,7 +42,7 @@ const RejectReasonModal = ({ onConfirm, onCancel, processing }) => {
   const [reason, setReason] = useState("");
   
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-60 flex items-center justify-center p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200">
       <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
         <div className="px-6 py-5 border-b border-slate-100">
           <h3 className="text-lg font-bold text-slate-900">Reject Withdrawal</h3>
@@ -81,7 +80,7 @@ const RejectReasonModal = ({ onConfirm, onCancel, processing }) => {
   );
 };
 
-// --- SUB-COMPONENT: WITHDRAWAL DETAILS MODAL ---
+// --- WITHDRAWAL DETAILS MODAL (Admin Action Modal) ---
 const WithdrawalModal = ({ payout, onClose, onAction }) => {
   const [partner, setPartner] = useState(null);
   const [loadingPartner, setLoadingPartner] = useState(true);
@@ -149,7 +148,7 @@ const WithdrawalModal = ({ payout, onClose, onAction }) => {
            {/* Section 1: CA Information */}
            <div>
               <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-4 flex items-center gap-2">
-                  <User size={14}/> CA Information
+                  <User size={14} /> CA Information
               </h4>
               {loadingPartner ? (
                  <div className="h-20 bg-slate-50 animate-pulse rounded-xl"></div>
@@ -180,7 +179,7 @@ const WithdrawalModal = ({ payout, onClose, onAction }) => {
            {/* Section 3: Bank Details */}
            <div>
               <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-4 flex items-center gap-2">
-                  <Building2 size={14}/> Bank details
+                  <Building2 size={14} /> Bank details
               </h4>
               <div className="grid grid-cols-3 gap-6">
                  <div><p className="text-xs text-slate-400 font-medium mb-1">Bank name</p><p className="text-sm font-bold text-slate-900">{payout.bankSnapshot?.bankName || "N/A"}</p></div>
@@ -224,7 +223,6 @@ const WithdrawalModal = ({ payout, onClose, onAction }) => {
                }}
              />
            )}
-
            {payout.status === 'approved' && (
              <>
                <button 
@@ -263,6 +261,7 @@ export default function WithdrawalManagement() {
   const [selectedPayout, setSelectedPayout] = useState(null);
 
   useEffect(() => {
+    // Real-time listener for Payouts
     const q = query(collection(db, "Payouts"), orderBy("requestedAt", "desc"));
     const unsub = onSnapshot(q, (snapshot) => {
       setPayouts(snapshot.docs.map(doc => ({ 
@@ -362,9 +361,7 @@ export default function WithdrawalManagement() {
             <h1 className="text-2xl font-bold text-slate-900">Withdrawals</h1>
             <p className="text-sm text-slate-500 mt-1">Review, approve, and track CA withdrawal requests</p>
         </div>
-        <button className="bg-[#0f172a] hover:bg-[#1e293b] text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-all shadow-sm flex items-center gap-2 cursor-pointer">
-            <Download size={16}/> Download report
-        </button>
+        {/* Request Withdrawal Button removed per instruction */}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -414,17 +411,17 @@ export default function WithdrawalManagement() {
                   <td className="py-5 px-6 text-sm font-medium text-slate-900">{p.partnerName}</td>
                   <td className="py-5 px-6 text-sm font-bold text-slate-900">₹{p.amount.toLocaleString()}</td>
                   <td className="py-5 px-6 text-sm text-slate-600 flex items-center gap-1">
-                     <span className="font-medium">{p.bankSnapshot?.bankName || "Unknown Bank"}</span>
-                     <span className="text-slate-400 text-xs">•••• {p.bankSnapshot?.accountNo?.slice(-4) || "0000"}</span>
+                      <span className="font-medium">{p.bankSnapshot?.bankName || "Unknown Bank"}</span>
+                      <span className="text-slate-400 text-xs">•••• {p.bankSnapshot?.accountNo?.slice(-4) || "0000"}</span>
                   </td>
                   <td className="py-5 px-6 text-center">{getStatusBadge(p.status)}</td>
                   <td className="py-5 px-6 text-right">
-                     <button 
-                       onClick={() => setSelectedPayout(p)} 
-                       className="px-4 py-1.5 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all shadow-sm cursor-pointer"
-                     >
-                       View Details
-                     </button>
+                      <button 
+                        onClick={() => setSelectedPayout(p)} 
+                        className="px-4 py-1.5 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all shadow-sm cursor-pointer"
+                      >
+                        View Details
+                      </button>
                   </td>
                 </tr>
               ))}
