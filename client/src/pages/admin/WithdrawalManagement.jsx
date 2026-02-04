@@ -8,7 +8,6 @@ import {
   Building2, User
 } from "lucide-react";
 
-
 // --- CUSTOM ICONS ---
 export const RevenueIcon = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -145,10 +144,10 @@ const WithdrawalModal = ({ payout, onClose, onAction }) => {
         {/* Modal Content */}
         <div className="p-8 overflow-y-auto space-y-8 custom-scrollbar">
            
-           {/* Section 1: CA Information */}
+           {/* Section 1: CPA Information */}
            <div>
               <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-4 flex items-center gap-2">
-                  <User size={14} /> CA Information
+                  <User size={14} /> CPA Information
               </h4>
               {loadingPartner ? (
                  <div className="h-20 bg-slate-50 animate-pulse rounded-xl"></div>
@@ -157,7 +156,7 @@ const WithdrawalModal = ({ payout, onClose, onAction }) => {
                     <div><p className="text-xs text-slate-400 font-medium mb-1">Full name</p><p className="text-sm font-bold text-slate-900">{partner?.name || payout.partnerName}</p></div>
                     <div><p className="text-xs text-slate-400 font-medium mb-1">Email address</p><p className="text-sm font-bold text-slate-900">{partner?.email || "N/A"}</p></div>
                     <div><p className="text-xs text-slate-400 font-medium mb-1">Phone number</p><p className="text-sm font-bold text-slate-900">{partner?.phone || "N/A"}</p></div>
-                    <div><p className="text-xs text-slate-400 font-medium mb-1">CA registration number</p><p className="text-sm font-bold text-slate-900">{partner?.referralCode || "N/A"}</p></div>
+                    <div><p className="text-xs text-slate-400 font-medium mb-1">CPA referral code</p><p className="text-sm font-bold text-slate-900">{partner?.referralCode || "N/A"}</p></div>
                  </div>
               )}
            </div>
@@ -359,7 +358,7 @@ export default function WithdrawalManagement() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
         <div>
             <h1 className="text-2xl font-bold text-slate-900">Withdrawals</h1>
-            <p className="text-sm text-slate-500 mt-1">Review, approve, and track CA withdrawal requests</p>
+            <p className="text-sm text-slate-500 mt-1">Review, approve, and track CPA withdrawal requests</p>
         </div>
       </div>
 
@@ -396,7 +395,7 @@ export default function WithdrawalManagement() {
             <thead className="bg-white border-b border-slate-100">
               <tr>
                 <th className="py-5 px-6 text-[11px] font-medium text-slate-400 uppercase tracking-wide">Date</th>
-                <th className="py-5 px-6 text-[11px] font-medium text-slate-400 uppercase tracking-wide">CA Name</th>
+                <th className="py-5 px-6 text-[11px] font-medium text-slate-400 uppercase tracking-wide">CPA Name</th>
                 <th className="py-5 px-6 text-[11px] font-medium text-slate-400 uppercase tracking-wide">Amount</th>
                 <th className="py-5 px-6 text-[11px] font-medium text-slate-400 uppercase tracking-wide">Bank Account</th>
                 <th className="py-5 px-6 text-[11px] font-medium text-slate-400 uppercase tracking-wide text-center">Status</th>

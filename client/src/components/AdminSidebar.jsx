@@ -29,7 +29,7 @@ export default function AdminSidebar({ children }) {
 
   const menuItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/admin/dashboard" },
-    { icon: Users, label: "CA Management", path: "/admin/cas" },
+    { icon: Users, label: "CPA Management", path: "/admin/cas" },
     { icon: TrendingUp, label: "Earnings & Revenue", path: "/admin/earnings" },
     { icon: Wallet, label: "Withdrawals", path: "/admin/withdrawals" },
   ];

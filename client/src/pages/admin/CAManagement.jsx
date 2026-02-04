@@ -72,8 +72,8 @@ export default function CAManagement() {
       
       {/* --- HEADER --- */}
       <div>
-         <h1 className="text-2xl font-semibold leading-9 text-slate-900">CA Management</h1>
-         <p className="text-base font-normal leading-6 text-slate-400">View, manage, and control Chartered Accountant accounts</p>
+         <h1 className="text-2xl font-semibold leading-9 text-slate-900">CPA Management</h1>
+         <p className="text-base font-normal leading-6 text-slate-400">View, manage, and control Chartered Public Accountant accounts</p>
       </div>
 
       {/* --- TABLE CONTAINER --- */}

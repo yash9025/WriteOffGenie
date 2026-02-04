@@ -87,7 +87,7 @@ export default function EarningsTracking() {
   const formatCurrency = (amount) => `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
 
   const downloadCSV = () => {
-    const headers = ['Date', 'CA Name', 'User Name', 'User Email', 'Plan', 'Amount', 'Commission', 'Net Revenue', 'Status'];
+    const headers = ['Date', 'CPA Name', 'User Name', 'User Email', 'Plan', 'Amount', 'Commission', 'Net Revenue', 'Status'];
     const rows = filteredData.map(u => {
       const amount = u.subscription?.amountPaid || 0;
       const commission = amount * 0.10;
@@ -126,7 +126,7 @@ export default function EarningsTracking() {
       <div className="flex flex-col md:flex-row justify-between items-end gap-6">
         <div>
            <h1 className="text-2xl font-bold text-slate-900">Earnings & Revenue</h1>
-           <p className="text-sm text-slate-500 mt-1">Track platform revenue, CA commissions, and payouts</p>
+           <p className="text-sm text-slate-500 mt-1">Track platform revenue, CPA commissions, and payouts</p>
         </div>
         <button 
           onClick={downloadCSV}
@@ -139,7 +139,7 @@ export default function EarningsTracking() {
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <StatCard title="Total Platform Revenue" value={formatCurrency(stats.totalRevenue)} subtitle="Total revenue from subscriptions" IconComponent={DollarSign} iconBgColor="bg-indigo-50"/>
-        <StatCard title="Total CA Commission" value={formatCurrency(stats.totalCommission)} subtitle="Commission payable to CAs" IconComponent={PieChart} iconBgColor="bg-blue-50"/>
+        <StatCard title="Total CPA Commission" value={formatCurrency(stats.totalCommission)} subtitle="Commission payable to CPAs" IconComponent={PieChart} iconBgColor="bg-blue-50"/>
         <StatCard title="Net Platform Revenue" value={formatCurrency(stats.netRevenue)} subtitle="Revenue after commissions" IconComponent={Wallet} iconBgColor="bg-emerald-50"/>
       </div>
 
@@ -150,7 +150,7 @@ export default function EarningsTracking() {
             <thead className="bg-white border-b border-slate-100">
               <tr>
                 <th className="py-5 px-6 text-xs font-medium text-slate-400 uppercase tracking-wide">Date</th>
-                <th className="py-5 px-6 text-xs font-medium text-slate-400 uppercase tracking-wide">CA Name</th>
+                <th className="py-5 px-6 text-xs font-medium text-slate-400 uppercase tracking-wide">CPA Name</th>
                 <th className="py-5 px-6 text-xs font-medium text-slate-400 uppercase tracking-wide">User</th>
                 <th className="py-5 px-6 text-xs font-medium text-slate-400 uppercase tracking-wide">Plan</th>
                 <th className="py-5 px-6 text-xs font-medium text-slate-400 uppercase tracking-wide">Amount</th>

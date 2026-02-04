@@ -159,15 +159,15 @@ export default function AdminDashboard() {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <StatCard 
-            title="Revenue from CA" 
+            title="Revenue from CPA" 
             value={formatCurrency(data.totalRev)} 
             subtext="Total revenue generated from subscriptions"
             Icon={RevenueIcon}
         />
         <StatCard 
-            title="Total CA Commission" 
+            title="Total CPA Commission" 
             value={formatCurrency(data.totalComm)} 
-            subtext="Commission payable to all CAs"
+            subtext="Commission payable to all CPAs"
             Icon={CommissionIcon}
         />
         <StatCard 
@@ -179,7 +179,7 @@ export default function AdminDashboard() {
         <StatCard 
             title="Active Subscriptions" 
             value={data.activeUsers.toLocaleString()} 
-            subtext="Subscriptions currently active via CA"
+            subtext="Subscriptions currently active via CPA"
             Icon={SubscriptionIcon}
         />
       </div>
@@ -219,7 +219,7 @@ export default function AdminDashboard() {
               <Line 
                 type="monotone" 
                 dataKey="commission" 
-                name="CA Commission"
+                name="CPA Commission"
                 stroke="#00D1A0" 
                 strokeWidth={3} 
                 dot={false}
