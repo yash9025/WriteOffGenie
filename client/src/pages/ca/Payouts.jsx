@@ -119,10 +119,10 @@ export default function Payouts() {
         amount,
         bankAccountId: selectedBank.id,
         bankSnapshot: {
-          accountHolderName: selectedBank.accountHolderName,
-          bankName: selectedBank.bankName,
-          accountNo: selectedBank.accountNo,
-          ifsc: selectedBank.ifsc
+          companyName: selectedBank.companyName,
+          routingNumber: selectedBank.routingNumber,
+          accountNumber: selectedBank.accountNumber,
+          accountType: selectedBank.accountType
         }
       });
       if (res.data.success) {
@@ -223,9 +223,9 @@ export default function Payouts() {
               const amountDisplay = item.amount ? `$${item.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "$0.00";
               
               const bankDisplay = item.bankSnapshot 
-                ? `${item.bankSnapshot.bankName} •••• ${item.bankSnapshot.accountNo?.slice(-4)}`
+                ? `${item.bankSnapshot.companyName} •••• ${item.bankSnapshot.accountNumber?.slice(-4)}`
                 : item.bankAccountUsed 
-                  ? `${item.bankName || 'Bank'} •••• ${item.bankAccountUsed}` 
+                  ? `Bank •••• ${item.bankAccountUsed}` 
                   : "Bank Transfer";
               
               const remarksDisplay = item.rejectionReason || item.remarks || "-";
@@ -335,7 +335,7 @@ export default function Payouts() {
                   >
                     <span className={selectedBank ? "text-[#111111]" : "text-[#9499A1]"}>
                       {selectedBank 
-                        ? `${selectedBank.bankName} •••• ${selectedBank.accountNo?.slice(-4)}` 
+                        ? `${selectedBank.companyName} •••• ${selectedBank.accountNumber?.slice(-4)}` 
                         : "Select bank account"}
                     </span>
                     <ChevronDown size={16} className={`text-[#9499A1] transition-transform ${showBankDropdown ? 'rotate-180' : ''}`} />
@@ -357,9 +357,9 @@ export default function Payouts() {
                         >
                           <div>
                             <span className="block font-medium text-[#111111]">
-                              {account.bankName} •••• {account.accountNo?.slice(-4)}
+                              {account.companyName} •••• {account.accountNumber?.slice(-4)}
                             </span>
-                            <span className="block text-xs text-[#9499A1] mt-0.5">{account.accountHolderName}</span>
+                            <span className="block text-xs text-[#9499A1] mt-0.5 capitalize">{account.accountType || 'checking'}</span>
                           </div>
                           {account.isDefault && (
                             <span className="text-[10px] bg-[#00D1A0]/10 text-[#00D1A0] px-2 py-0.5 rounded-full font-bold uppercase">

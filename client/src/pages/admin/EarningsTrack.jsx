@@ -36,7 +36,7 @@ export default function EarningsTracking() {
         const pMap = {};
         pSnap.forEach(d => {
           const data = d.data();
-          pMap[d.id] = { name: data.name || "Unknown", code: data.referralCode };
+          pMap[d.id] = { name: data.name || "Unknown", code: data.referralCode, commissionRate: (data.commissionRate || 10) / 100 };
         });
         setPartners(pMap);
         setUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -70,13 +70,17 @@ export default function EarningsTracking() {
     });
   }, [users, searchQuery]);
 
-  // Calculate Totals
+  // Calculate Totals (using each partner's specific commission rate)
   const stats = useMemo(() => {
     const totalRevenue = users.reduce((acc, u) => acc + (u.subscription?.amountPaid || 0), 0);
-    const totalCommission = totalRevenue * 0.10;
+    const totalCommission = users.reduce((acc, u) => {
+      const amount = u.subscription?.amountPaid || 0;
+      const partnerRate = u.referredBy && partners[u.referredBy] ? partners[u.referredBy].commissionRate : 0.10;
+      return acc + (amount * partnerRate);
+    }, 0);
     const netRevenue = totalRevenue - totalCommission;
     return { totalRevenue, totalCommission, netRevenue };
-  }, [users]);
+  }, [users, partners]);
 
   const formatDate = (timestamp) => {
     if (!timestamp) return "N/A";
@@ -87,17 +91,18 @@ export default function EarningsTracking() {
   const formatCurrency = (amount) => `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
 
   const downloadCSV = () => {
-    const headers = ['Date', 'CPA Name', 'User Name', 'User Email', 'Plan', 'Amount', 'Commission', 'Net Revenue', 'Status'];
+    const headers = ['Date', 'CPA Name', 'User Name', 'User Email', 'Plan', 'Amount', 'Commission Rate', 'Commission', 'Net Revenue', 'Status'];
     const rows = filteredData.map(u => {
       const amount = u.subscription?.amountPaid || 0;
-      const commission = amount * 0.10;
+      const partnerRate = u.referredBy && partners[u.referredBy] ? partners[u.referredBy].commissionRate : 0.10;
+      const commission = amount * partnerRate;
       const net = amount - commission;
       const isCredited = u.subscription?.status === 'active';
       const caName = u.referredBy && partners[u.referredBy] ? partners[u.referredBy].name : "Direct / Organic";
       
       return [
         formatDate(u.createdAt), caName, u.name || 'N/A', u.email || 'N/A',
-        u.subscription?.planType || 'Free', amount.toFixed(2), commission.toFixed(2),
+        u.subscription?.planType || 'Free', amount.toFixed(2), `${(partnerRate * 100).toFixed(0)}%`, commission.toFixed(2),
         net.toFixed(2), isCredited ? 'Credited' : 'Pending'
       ];
     });
@@ -162,7 +167,8 @@ export default function EarningsTracking() {
             <tbody className="divide-y divide-slate-50">
               {filteredData.map((u) => {
                  const amount = u.subscription?.amountPaid || 0;
-                 const commission = amount * 0.10;
+                 const partnerRate = u.referredBy && partners[u.referredBy] ? partners[u.referredBy].commissionRate : 0.10;
+                 const commission = amount * partnerRate;
                  const net = amount - commission;
                  const isCredited = u.subscription?.status === 'active';
                  const caName = u.referredBy && partners[u.referredBy] ? partners[u.referredBy].name : "Direct / Organic";

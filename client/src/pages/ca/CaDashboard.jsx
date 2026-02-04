@@ -173,7 +173,7 @@ function Dashboard() {
             </div>
           </div>
           <p className="text-[#9499A1] text-xs leading-relaxed">
-            Earn <strong className="text-[#00D1A0]">10% commission</strong> on every subscription purchased via your link.
+            Earn <strong className="text-[#00D1A0]">{profile?.commissionRate || 10}% commission</strong> on every subscription purchased via your link.
           </p>
           <button
             onClick={copyLink}
@@ -247,9 +247,10 @@ function Dashboard() {
         <div className="flex flex-col gap-3">
           {filteredReferrals.length > 0 ? (
             filteredReferrals.slice(0, 5).map((client) => {
-              const hasSubscription = client.subscription?.plan && client.subscription?.status === "active";
-              const planName = hasSubscription ? (client.subscription?.plan || "Standard") : "Free";
-              const commission = ((client.subscription?.amountPaid || 0) * 0.1).toFixed(2);
+              const hasSubscription = client.subscription?.planType && client.subscription?.status === "active";
+              const planName = hasSubscription ? client.subscription.planType : "Free";
+              const commissionRate = (profile?.commissionRate || 10) / 100;
+              const commission = ((client.subscription?.amountPaid || 0) * commissionRate).toFixed(2);
               
               return (
                 <div key={client.id} className="flex flex-col md:flex-row md:items-center justify-between p-3 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-[#E3E6EA]">

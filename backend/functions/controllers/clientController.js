@@ -3,7 +3,7 @@ import { https } from 'firebase-functions';
 import { db, auth } from "../firebaseConfig.js";
 
 const PLAN_AMOUNT = 1000;
-const COMMISSION_RATE = 0.10; // 10%
+const DEFAULT_COMMISSION_RATE = 0.10; // 10% default (used if partner has no custom rate)
 
 export const registerClient = async (data, context) => {
     // 1. Get input data
@@ -20,6 +20,7 @@ export const registerClient = async (data, context) => {
 
     try {
         let linkedCAId = null;
+        let partnerData = null;
 
         // 2. Find the Partner (Referrer)
         if (referralCode) {
@@ -30,6 +31,7 @@ export const registerClient = async (data, context) => {
 
             if (!caQuery.empty) {
                 linkedCAId = caQuery.docs[0].id;
+                partnerData = caQuery.docs[0].data();
             }
         }
 
@@ -66,10 +68,12 @@ export const registerClient = async (data, context) => {
             subscription: subscriptionData
         });
 
-        // 6. COMMISSION LOGIC (Strict Check)
+        // 6. COMMISSION LOGIC (Uses Partner's specific commission rate)
         // ONLY add commission if they actually subscribed (paymentSuccess === true)
         if (linkedCAId && paymentSuccess) {
-            const commission = PLAN_AMOUNT * COMMISSION_RATE; // 1000 * 0.10 = 100
+            // Use partner's custom commission rate, or default to 10%
+            const partnerCommissionRate = (partnerData?.commissionRate || 10) / 100;
+            const commission = PLAN_AMOUNT * partnerCommissionRate;
             
             await db.collection("Partners").doc(linkedCAId).update({
                 "stats.totalReferred": FieldValue.increment(1),

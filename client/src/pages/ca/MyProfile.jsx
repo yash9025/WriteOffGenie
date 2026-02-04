@@ -28,7 +28,7 @@ export default function MyProfile() {
   // Form States
   const [personalForm, setPersonalForm] = useState({ name: "", email: "", phone: "", caRegNumber: "" });
   const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
-  const [bankForm, setBankForm] = useState({ accountHolderName: "", bankName: "", accountNo: "", ifsc: "" });
+  const [bankForm, setBankForm] = useState({ companyName: "", routingNumber: "", accountNumber: "", accountType: "checking" });
 
   const [saving, setSaving] = useState(false);
 
@@ -104,24 +104,28 @@ export default function MyProfile() {
 
   const handleOpenAddBank = () => {
     setEditingBank(null);
-    setBankForm({ accountHolderName: "", bankName: "", accountNo: "", ifsc: "" });
+    setBankForm({ companyName: "", routingNumber: "", accountNumber: "", accountType: "checking" });
     setShowBankModal(true);
   };
 
   const handleOpenEditBank = (account) => {
     setEditingBank(account);
     setBankForm({
-      accountHolderName: account.accountHolderName || "",
-      bankName: account.bankName || "",
-      accountNo: account.accountNo || "",
-      ifsc: account.ifsc || ""
+      companyName: account.companyName || "",
+      routingNumber: account.routingNumber || "",
+      accountNumber: account.accountNumber || "",
+      accountType: account.accountType || "checking"
     });
     setShowBankModal(true);
   };
 
   const handleSaveBank = async () => {
-    if (!bankForm.accountHolderName || !bankForm.bankName || !bankForm.accountNo || !bankForm.ifsc) {
+    if (!bankForm.companyName || !bankForm.routingNumber || !bankForm.accountNumber || !bankForm.accountType) {
       return toast.error("Please fill all bank details");
+    }
+    
+    if (bankForm.routingNumber.length !== 9 || !/^\d{9}$/.test(bankForm.routingNumber)) {
+      return toast.error("Routing number must be exactly 9 digits");
     }
     
     setSaving(true);
@@ -147,7 +151,7 @@ export default function MyProfile() {
       
       setShowBankModal(false);
       setEditingBank(null);
-      setBankForm({ accountHolderName: "", bankName: "", accountNo: "", ifsc: "" });
+      setBankForm({ companyName: "", routingNumber: "", accountNumber: "", accountType: "checking" });
     } catch (error) {
       console.error(error);
       toast.error("Failed to save bank details");
@@ -315,7 +319,12 @@ export default function MyProfile() {
 
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-base font-bold text-[#111]">{account.bankName}</h3>
+                    <div>
+                      <h3 className="text-base font-bold text-[#111]">{account.companyName}</h3>
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded ${account.accountType === 'checking' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
+                        {account.accountType === 'checking' ? 'Checking' : 'Savings'}
+                      </span>
+                    </div>
                     <div className="flex items-center gap-1">
                       {!account.isDefault && (
                         <button 
@@ -345,16 +354,12 @@ export default function MyProfile() {
 
                   <div className="grid grid-cols-2 gap-y-3 gap-x-4 pt-2 border-t border-dashed border-gray-200">
                     <div>
-                      <p className="text-[10px] text-[#9499A1] font-bold uppercase mb-0.5">Account Holder</p>
-                      <p className="text-sm font-medium text-[#111] truncate">{account.accountHolderName}</p>
+                      <p className="text-[10px] text-[#9499A1] font-bold uppercase mb-0.5">Routing Number</p>
+                      <p className="text-sm font-medium text-[#111] font-mono">•••••{account.routingNumber?.slice(-4)}</p>
                     </div>
                     <div>
                       <p className="text-[10px] text-[#9499A1] font-bold uppercase mb-0.5">Account Number</p>
-                      <p className="text-sm font-medium text-[#111] font-mono">•••• {account.accountNo?.slice(-4)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] text-[#9499A1] font-bold uppercase mb-0.5">IFSC Code</p>
-                      <p className="text-sm font-medium text-[#111] font-mono">{account.ifsc}</p>
+                      <p className="text-sm font-medium text-[#111] font-mono">•••• {account.accountNumber?.slice(-4)}</p>
                     </div>
                   </div>
                 </div>
@@ -404,32 +409,39 @@ export default function MyProfile() {
         >
            <div className="flex flex-col gap-4">
               <Input 
-                label="Account holder name" 
-                placeholder="Enter name as per bank records"
-                value={bankForm.accountHolderName} 
-                onChange={e => setBankForm({...bankForm, accountHolderName: e.target.value})} 
+                label="Full Legal Company Name" 
+                placeholder="Enter company name as registered with bank"
+                value={bankForm.companyName} 
+                onChange={e => setBankForm({...bankForm, companyName: e.target.value})} 
               />
               
-              {/* Standard Input for Bank Name */}
               <Input 
-                label="Bank name" 
-                placeholder="Enter bank name (e.g. HDFC Bank)"
-                value={bankForm.bankName} 
-                onChange={e => setBankForm({...bankForm, bankName: e.target.value})} 
+                label="Routing Number" 
+                placeholder="9-digit routing number"
+                value={bankForm.routingNumber} 
+                onChange={e => setBankForm({...bankForm, routingNumber: e.target.value.replace(/\D/g, '').slice(0, 9)})} 
+                maxLength={9}
               />
 
               <Input 
-                label="Account number" 
+                label="Bank Account Number" 
                 placeholder="Enter account number"
-                value={bankForm.accountNo} 
-                onChange={e => setBankForm({...bankForm, accountNo: e.target.value})} 
+                value={bankForm.accountNumber} 
+                onChange={e => setBankForm({...bankForm, accountNumber: e.target.value.replace(/\D/g, '')})} 
               />
-              <Input 
-                label="IFSC code" 
-                placeholder="Enter IFSC code"
-                value={bankForm.ifsc} 
-                onChange={e => setBankForm({...bankForm, ifsc: e.target.value.toUpperCase()})} 
-              />
+              
+              {/* Account Type Dropdown */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-[#111]">Account Type</label>
+                <select
+                  value={bankForm.accountType}
+                  onChange={e => setBankForm({...bankForm, accountType: e.target.value})}
+                  className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm text-[#111] focus:outline-none focus:border-[#011C39] focus:ring-1 focus:ring-[#011C39] transition-all bg-white cursor-pointer"
+                >
+                  <option value="checking">Checking</option>
+                  <option value="savings">Savings</option>
+                </select>
+              </div>
               
               <div className="flex gap-3 mt-4">
                   <Button variant="outline" onClick={() => { setShowBankModal(false); setEditingBank(null); }}>Cancel</Button>

@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { httpsCallable } from "firebase/functions";
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { useNavigate, Link } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
+import { Loader2, ShieldAlert } from "lucide-react";
 import { functions, auth } from "../../services/firebase"; 
 
 function Register() {
+  const [searchParams] = useSearchParams();
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -14,9 +15,60 @@ function Register() {
     caRegNumber: "",
   });
 
+  // Invite-only state
+  const [inviteValid, setInviteValid] = useState(null); // null = loading, true = valid, false = invalid
+  const [inviteData, setInviteData] = useState(null);
+  const [inviteError, setInviteError] = useState("");
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
+
+  // Verify invite token on mount
+  useEffect(() => {
+    const token = searchParams.get("token");
+    
+    if (!token) {
+      setInviteValid(false);
+      setInviteError("This page is invite-only. Please contact an administrator to receive an invitation.");
+      return;
+    }
+
+    const verifyToken = async () => {
+      try {
+        const verifyFn = httpsCallable(functions, "verifyInvite");
+        const result = await verifyFn({ token });
+        
+        if (result.data.valid) {
+          setInviteData({
+            name: result.data.name,
+            email: result.data.email,
+            commissionRate: result.data.commissionRate,
+            token: token
+          });
+          setForm(prev => ({
+            ...prev,
+            name: result.data.name,
+            email: result.data.email
+          }));
+          setInviteValid(true);
+        } else {
+          setInviteValid(false);
+          setInviteError("Invalid or expired invitation.");
+        }
+      } catch (err) {
+        console.error("Verify Error:", err);
+        setInviteValid(false);
+        setInviteError(err.message.includes("expired") 
+          ? "This invitation has expired. Please request a new one from the administrator."
+          : err.message.includes("not found") 
+            ? "This invitation has already been used or is no longer valid."
+            : "Invalid invitation. Please contact an administrator.");
+      }
+    };
+
+    verifyToken();
+  }, [searchParams]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -25,7 +77,11 @@ function Register() {
 
     try {
       const registerFn = httpsCallable(functions, "registerCA");
-      await registerFn(form);
+      await registerFn({
+        ...form,
+        commissionRate: inviteData?.commissionRate || 10,
+        inviteToken: inviteData?.token
+      });
       await signInWithEmailAndPassword(auth, form.email, form.password);
       navigate("/dashboard");
     } catch (err) {
@@ -99,8 +155,38 @@ function Register() {
             </div>
           </div>
 
-          {/* Form Card */}
-          <div className="flex flex-col items-center w-full">
+          {/* Invite Validation Loading State */}
+          {inviteValid === null && (
+            <div className="flex flex-col items-center justify-center py-16">
+              <Loader2 className="animate-spin text-[#011C39] mb-4" size={32} />
+              <p className="text-sm text-slate-500">Verifying your invitation...</p>
+            </div>
+          )}
+
+          {/* Invite Invalid State */}
+          {inviteValid === false && (
+            <div className="flex flex-col items-center w-full">
+              <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4">
+                <ShieldAlert size={32} className="text-red-500" />
+              </div>
+              <h2 className="text-xl font-semibold text-[#111111] mb-2 text-center">
+                Invitation Required
+              </h2>
+              <p className="text-sm text-slate-500 text-center mb-6 max-w-sm">
+                {inviteError}
+              </p>
+              <Link 
+                to="/login"
+                className="w-full py-2.5 text-sm font-semibold text-white bg-[#011C39] rounded-lg hover:bg-[#022a55] transition-colors text-center"
+              >
+                Go to Login
+              </Link>
+            </div>
+          )}
+
+          {/* Form Card - Only show if invite is valid */}
+          {inviteValid === true && (
+            <div className="flex flex-col items-center w-full">
             
             {/* Header */}
             <div className="text-center mb-4">
@@ -110,6 +196,11 @@ function Register() {
               <p className="text-xs text-[#9499A1]">
                 Sign up to start earning commissions today
               </p>
+              {inviteData?.commissionRate && (
+                <p className="text-xs text-emerald-600 font-medium mt-1">
+                  Your commission rate: {inviteData.commissionRate}%
+                </p>
+              )}
             </div>
 
             {/* Form */}
@@ -127,9 +218,10 @@ function Register() {
                   type="text" 
                   name="name"
                   placeholder="Enter your full name" 
-                  className="w-full px-3 py-2 text-sm text-[#111111] bg-white border border-[#E3E6EA] rounded-lg outline-none focus:border-[#011C39] transition-colors"
+                  className={`w-full px-3 py-2 text-sm text-[#111111] border border-[#E3E6EA] rounded-lg outline-none transition-colors ${inviteData ? 'bg-slate-50 cursor-not-allowed' : 'bg-white focus:border-[#011C39]'}`}
                   value={form.name}
                   onChange={handleChange}
+                  readOnly={!!inviteData}
                   required
                 />
               </div>
@@ -141,9 +233,10 @@ function Register() {
                   type="email" 
                   name="email"
                   placeholder="Enter your work email" 
-                  className="w-full px-3 py-2 text-sm text-[#111111] bg-white border border-[#E3E6EA] rounded-lg outline-none focus:border-[#011C39] transition-colors"
+                  className={`w-full px-3 py-2 text-sm text-[#111111] border border-[#E3E6EA] rounded-lg outline-none transition-colors ${inviteData ? 'bg-slate-50 cursor-not-allowed' : 'bg-white focus:border-[#011C39]'}`}
                   value={form.email}
                   onChange={handleChange}
+                  readOnly={!!inviteData}
                   required
                 />
               </div>
@@ -215,6 +308,7 @@ function Register() {
               </Link>
             </div>
           </div>
+          )}
         </div>
       </div>
     </div>

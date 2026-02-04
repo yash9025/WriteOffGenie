@@ -16,7 +16,7 @@ export const registerCA = async (data, context) => {
     throw new https.HttpsError("invalid-argument", errors.join(", "));
   }
 
-  const { email, password, name, phone, caRegNumber } = data;
+  const { email, password, name, phone, caRegNumber, commissionRate, inviteToken } = data;
 
   try {
     const userRecord = await auth.createUser({
@@ -47,6 +47,7 @@ export const registerCA = async (data, context) => {
       referralCode,
       role: "ca", 
       status: "active",
+      commissionRate: commissionRate || 10, // Commission rate from invite (default 10%)
       createdAt: FieldValue.serverTimestamp(),
       walletBalance: 0,
       stats: {
@@ -55,6 +56,22 @@ export const registerCA = async (data, context) => {
         totalSubscribed:0
       } 
     });
+
+    // Mark the invite as used if inviteToken was provided
+    if (inviteToken) {
+      const inviteQuery = await db.collection("PendingInvites")
+        .where("email", "==", email)
+        .where("status", "==", "pending")
+        .get();
+      
+      if (!inviteQuery.empty) {
+        await inviteQuery.docs[0].ref.update({
+          status: "completed",
+          completedAt: FieldValue.serverTimestamp(),
+          partnerId: userRecord.uid
+        });
+      }
+    }
 
     return { success: true, uid: userRecord.uid };
 

@@ -61,18 +61,17 @@ export const requestWithdrawal = async (data, auth) => {
         status: "pending",
         paymentMethod: "Bank Transfer",
         
-        // New: Store the bank account reference and full snapshot
+        // Store the bank account reference and full snapshot
         bankAccountId: bankAccountId,
         bankSnapshot: {
-          accountHolderName: bankSnapshot.accountHolderName,
-          bankName: bankSnapshot.bankName,
-          accountNo: bankSnapshot.accountNo,  // Full account number for admin
-          ifsc: bankSnapshot.ifsc
+          companyName: bankSnapshot.companyName,
+          routingNumber: bankSnapshot.routingNumber,
+          accountNumber: bankSnapshot.accountNumber,
+          accountType: bankSnapshot.accountType
         },
         
-        // Legacy fields for backward compatibility  
-        bankAccountUsed: bankSnapshot.accountNo?.slice(-4),  // Masked last 4 digits
-        bankName: bankSnapshot.bankName,
+        // Legacy field for backward compatibility (masked last 4 digits)
+        bankAccountUsed: bankSnapshot.accountNumber?.slice(-4),
         
         requestedAt: admin.firestore.FieldValue.serverTimestamp(),
         referenceId: payoutRef.id.substring(0, 10).toUpperCase()

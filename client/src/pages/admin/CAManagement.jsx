@@ -3,9 +3,9 @@ import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { useNavigate } from "react-router-dom";
 import { db } from "../../services/firebase";
-import toast, { Toaster } from "react-hot-toast"; // 🚀 Added Toaster
+import toast, { Toaster } from "react-hot-toast";
 import { 
-  Search, Loader2, Ban, CheckCircle2 
+  Search, Loader2, Ban, CheckCircle2, UserPlus, X 
 } from "lucide-react";
 
 export default function CAManagement() {
@@ -13,6 +13,15 @@ export default function CAManagement() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(null);
   const [filter, setFilter] = useState("");
+  
+  // Invite Modal State
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteForm, setInviteForm] = useState({
+    name: "",
+    email: "",
+    commissionRate: 10
+  });
+  const [sendingInvite, setSendingInvite] = useState(false);
   
   const navigate = useNavigate();
 
@@ -24,6 +33,29 @@ export default function CAManagement() {
     });
     return () => unsub();
   }, []);
+
+  // Handle sending CPA invite
+  const handleSendInvite = async (e) => {
+    e.preventDefault();
+    setSendingInvite(true);
+    const toastId = toast.loading("Sending invitation...");
+
+    try {
+      const fn = httpsCallable(getFunctions(), 'sendCPAInvite');
+      await fn(inviteForm);
+      toast.success("Invitation sent successfully!", { id: toastId });
+      setShowInviteModal(false);
+      setInviteForm({ name: "", email: "", commissionRate: 10 });
+    } catch (e) {
+      console.error(e);
+      const errorMsg = e.message.includes("already exists") 
+        ? "A partner with this email already exists." 
+        : "Failed to send invitation. Please try again.";
+      toast.error(errorMsg, { id: toastId });
+    } finally {
+      setSendingInvite(false);
+    }
+  };
 
 
   const toggleStatus = async (id, currentStatus) => {
@@ -71,10 +103,95 @@ export default function CAManagement() {
       <Toaster position="top-right" />
       
       {/* --- HEADER --- */}
-      <div>
-         <h1 className="text-2xl font-semibold leading-9 text-slate-900">CPA Management</h1>
-         <p className="text-base font-normal leading-6 text-slate-400">View, manage, and control Chartered Public Accountant accounts</p>
+      <div className="flex items-center justify-between">
+         <div>
+           <h1 className="text-2xl font-semibold leading-9 text-slate-900">CPA Management</h1>
+           <p className="text-base font-normal leading-6 text-slate-400">View, manage, and control Chartered Public Accountant accounts</p>
+         </div>
+         <button
+           onClick={() => setShowInviteModal(true)}
+           className="flex items-center gap-2 px-5 py-2.5 bg-[#011C39] text-white rounded-lg text-sm font-semibold hover:bg-[#022a55] transition-colors cursor-pointer"
+         >
+           <UserPlus size={18} />
+           Invite CPA
+         </button>
       </div>
+
+      {/* --- INVITE MODAL --- */}
+      {showInviteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 relative animate-in fade-in zoom-in duration-200">
+            <button
+              onClick={() => setShowInviteModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+            >
+              <X size={20} />
+            </button>
+
+            <h2 className="text-xl font-semibold text-slate-900 mb-1">Invite CPA Partner</h2>
+            <p className="text-sm text-slate-500 mb-6">Send an invitation to join the partner program</p>
+
+            <form onSubmit={handleSendInvite} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
+                <input
+                  type="text"
+                  value={inviteForm.name}
+                  onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })}
+                  placeholder="Enter partner's full name"
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#011C39] transition-colors"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Email Address</label>
+                <input
+                  type="email"
+                  value={inviteForm.email}
+                  onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
+                  placeholder="Enter partner's email"
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#011C39] transition-colors"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Commission Rate (%)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={inviteForm.commissionRate}
+                  onChange={(e) => setInviteForm({ ...inviteForm, commissionRate: parseInt(e.target.value) || 10 })}
+                  placeholder="10"
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#011C39] transition-colors"
+                  required
+                />
+                <p className="mt-1 text-xs text-slate-400">Partner will earn this percentage on each referred subscription</p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowInviteModal(false)}
+                  className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={sendingInvite}
+                  className="flex-1 px-4 py-2.5 bg-[#011C39] text-white rounded-lg text-sm font-semibold hover:bg-[#022a55] transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {sendingInvite ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
+                  {sendingInvite ? "Sending..." : "Send Invite"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* --- TABLE CONTAINER --- */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">

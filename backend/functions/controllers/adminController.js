@@ -97,3 +97,45 @@ export const processWithdrawal = async (data, context) => {
         throw new https.HttpsError('internal', error.message);
     }
 };
+
+// Update Partner Commission Rate
+export const updateCommissionRate = async (data, context) => {
+    // 1. Auth Check
+    if (!context.auth) {
+        throw new https.HttpsError('unauthenticated', 'Admin access only.');
+    }
+
+    const { partnerId, commissionRate } = data;
+
+    // 2. Validate Input
+    if (!partnerId) {
+        throw new https.HttpsError('invalid-argument', 'Partner ID is required.');
+    }
+
+    const rate = Number(commissionRate);
+    if (isNaN(rate) || rate < 1 || rate > 100) {
+        throw new https.HttpsError('invalid-argument', 'Commission rate must be between 1 and 100.');
+    }
+
+    try {
+        const partnerRef = db.collection("Partners").doc(partnerId);
+        const partnerDoc = await partnerRef.get();
+
+        if (!partnerDoc.exists) {
+            throw new https.HttpsError('not-found', 'Partner not found.');
+        }
+
+        await partnerRef.update({
+            commissionRate: rate,
+            commissionUpdatedAt: FieldValue.serverTimestamp(),
+            commissionUpdatedBy: context.auth.uid
+        });
+
+        return { success: true, newRate: rate };
+
+    } catch (error) {
+        console.error("Update Commission Rate Error:", error);
+        if (error.code && error.details) throw error;
+        throw new https.HttpsError('internal', error.message);
+    }
+};

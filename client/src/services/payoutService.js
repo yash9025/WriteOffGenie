@@ -32,7 +32,7 @@ export const requestWithdrawal = async (userId, requestedAmount) => {
       if (!partnerDoc.exists()) throw "Partner record not found.";
 
       // 🛑 Bank Guard
-      if (!bankDoc.exists() || !bankDoc.data().accountNo) {
+      if (!bankDoc.exists() || !bankDoc.data().accountNumber) {
         throw "No bank account found. Please update bank details first.";
       }
 
@@ -42,7 +42,7 @@ export const requestWithdrawal = async (userId, requestedAmount) => {
 
       // 🔐 Logic & Security Guards
       if (data.role !== "ca") throw "Unauthorized: CA role required.";
-      if (amount < 500) throw "Minimum withdrawal is ₹500.";
+      if (amount < 500) throw "Minimum withdrawal is $500.";
       if (amount > currentBalance) throw "Insufficient balance.";
 
       const pName = data.name || "Test User"; 
@@ -54,7 +54,7 @@ export const requestWithdrawal = async (userId, requestedAmount) => {
         amount: amount,
         status: "pending", 
         paymentMethod: "Bank Transfer",
-        bankAccountUsed: bankDoc.data().accountNo.slice(-4), // Masked account reference
+        bankAccountUsed: bankDoc.data().accountNumber.slice(-4), // Masked account reference
         requestedAt: serverTimestamp(),
         referenceId: payoutRef.id.substring(0, 10).toUpperCase()
       });

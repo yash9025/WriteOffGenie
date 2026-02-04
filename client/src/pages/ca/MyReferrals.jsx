@@ -173,20 +173,21 @@ export default function MyReferrals() {
             <p className="w-1/5">Signup Date</p>
             <p className="w-1/5">Plan</p>
             <p className="w-1/6">Status</p>
-            <p className="w-1/6 text-right">Commission</p>
+            <p className="w-1/6 text-right">Commission ({profile?.commissionRate || 10}%)</p>
           </div>
 
           {/* Table Rows */}
           <div className="flex flex-col gap-2">
             {filtered.length > 0 ? (
               filtered.map((client) => {
-                const hasSubscription = client.subscription?.plan && client.subscription?.status === "active";
-                const planName = hasSubscription ? (client.subscription?.plan || "Standard Plan") : "Free Plan";
+                const hasSubscription = client.subscription?.planType && client.subscription?.status === "active";
+                const planName = hasSubscription ? client.subscription.planType : "Free Plan";
                 const isActive = true;
                 const dateStr = client.createdAt?.toDate().toLocaleDateString('en-US', { 
                   month: 'short', day: 'numeric', year: 'numeric' 
                 });
-                const commission = ((client.subscription?.amountPaid || 0) * 0.10).toFixed(2);
+                const commissionRate = profile?.commissionRate || 10;
+                const commission = ((client.subscription?.amountPaid || 0) * (commissionRate / 100)).toFixed(2);
 
                 return (
                   <div key={client.id} className="flex flex-col md:flex-row md:items-center justify-between p-3 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-[#E3E6EA]">

@@ -180,10 +180,11 @@ const WithdrawalModal = ({ payout, onClose, onAction }) => {
               <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-4 flex items-center gap-2">
                   <Building2 size={14} /> Bank details
               </h4>
-              <div className="grid grid-cols-3 gap-6">
-                 <div><p className="text-xs text-slate-400 font-medium mb-1">Bank name</p><p className="text-sm font-bold text-slate-900">{payout.bankSnapshot?.bankName || "N/A"}</p></div>
-                 <div><p className="text-xs text-slate-400 font-medium mb-1">Account number</p><p className="text-sm font-bold text-slate-900 font-mono">{payout.bankSnapshot?.accountNo || "N/A"}</p></div>
-                 <div><p className="text-xs text-slate-400 font-medium mb-1">IFSC code</p><p className="text-sm font-bold text-slate-900 font-mono">{payout.bankSnapshot?.ifsc || "N/A"}</p></div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                 <div><p className="text-xs text-slate-400 font-medium mb-1">Company Name</p><p className="text-sm font-bold text-slate-900">{payout.bankSnapshot?.companyName || "N/A"}</p></div>
+                 <div><p className="text-xs text-slate-400 font-medium mb-1">Routing Number</p><p className="text-sm font-bold text-slate-900 font-mono">{payout.bankSnapshot?.routingNumber || "N/A"}</p></div>
+                 <div><p className="text-xs text-slate-400 font-medium mb-1">Account Number</p><p className="text-sm font-bold text-slate-900 font-mono">{payout.bankSnapshot?.accountNumber || "N/A"}</p></div>
+                 <div><p className="text-xs text-slate-400 font-medium mb-1">Account Type</p><p className="text-sm font-bold text-slate-900 capitalize">{payout.bankSnapshot?.accountType || "N/A"}</p></div>
               </div>
            </div>
         </div>
@@ -409,8 +410,8 @@ export default function WithdrawalManagement() {
                   <td className="py-5 px-6 text-sm font-medium text-slate-900">{p.partnerName}</td>
                   <td className="py-5 px-6 text-sm font-bold text-slate-900">${p.amount.toLocaleString()}</td>
                   <td className="py-5 px-6 text-sm text-slate-600 flex items-center gap-1">
-                      <span className="font-medium">{p.bankSnapshot?.bankName || "Unknown Bank"}</span>
-                      <span className="text-slate-400 text-xs">•••• {p.bankSnapshot?.accountNo?.slice(-4) || "0000"}</span>
+                      <span className="font-medium">{p.bankSnapshot?.companyName || "Bank Account"}</span>
+                      <span className="text-slate-400 text-xs">•••• {p.bankSnapshot?.accountNumber?.slice(-4) || "0000"}</span>
                   </td>
                   <td className="py-5 px-6 text-center">{getStatusBadge(p.status)}</td>
                   <td className="py-5 px-6 text-right">

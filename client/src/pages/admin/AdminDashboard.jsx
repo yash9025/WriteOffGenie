@@ -101,17 +101,34 @@ export default function AdminDashboard() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [clientsSnap, payoutsSnap] = await Promise.all([
+        const [clientsSnap, payoutsSnap, partnersSnap] = await Promise.all([
           getDocs(collection(db, "Clients")),
           getDocs(collection(db, "Payouts")),
+          getDocs(collection(db, "Partners")),
         ]);
 
         const clients = clientsSnap.docs.map(d => ({ ...d.data(), createdAt: d.data().createdAt?.toDate() }));
         const payouts = payoutsSnap.docs.map(d => d.data());
+        
+        // Build a map of partner commissionRate by id
+        const partnerRates = {};
+        partnersSnap.docs.forEach(d => {
+          partnerRates[d.id] = (d.data().commissionRate || 10) / 100;
+        });
 
         // KPIs
         const totalRev = clients.reduce((acc, c) => acc + (c.subscription?.amountPaid || 0), 0);
-        const totalComm = totalRev * 0.10;
+        
+        // Calculate total commission using each partner's specific rate
+        const totalComm = clients.reduce((acc, c) => {
+          if (c.subscription?.amountPaid && c.referredBy && partnerRates[c.referredBy]) {
+            return acc + (c.subscription.amountPaid * partnerRates[c.referredBy]);
+          } else if (c.subscription?.amountPaid && c.referredBy) {
+            return acc + (c.subscription.amountPaid * 0.10); // Default 10%
+          }
+          return acc;
+        }, 0);
+        
         const totalPending = payouts.filter(p => p.status === 'pending').reduce((acc, p) => acc + p.amount, 0);
         const activeUsers = clients.filter(c => c.subscription?.status === 'active').length;
 
@@ -124,7 +141,12 @@ export default function AdminDashboard() {
           const monthIndex = client.createdAt.getMonth();
           const amt = client.subscription?.amountPaid || 0;
           monthlyData[monthIndex].revenue += amt;
-          monthlyData[monthIndex].commission += (amt * 0.1);
+          
+          // Use partner-specific commission rate for chart
+          const partnerRate = client.referredBy && partnerRates[client.referredBy] 
+            ? partnerRates[client.referredBy] 
+            : 0.10;
+          monthlyData[monthIndex].commission += (amt * partnerRate);
         });
 
         setData({ totalRev, totalComm, totalPending, activeUsers, chartData: monthlyData });

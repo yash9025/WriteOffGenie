@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
 import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
 import { Loader2, ChevronDown } from "lucide-react";
@@ -24,6 +24,7 @@ const StatCard = ({ icon: Icon, label, value, description }) => (
 export default function Performance() {
   const { user } = useAuth();
   const [clients, setClients] = useState([]);
+  const [commissionRate, setCommissionRate] = useState(10);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState('month');
   const [filterOpen, setFilterOpen] = useState(false);
@@ -31,9 +32,16 @@ export default function Performance() {
   useEffect(() => {
     if (!user) return;
 
+    // Get partner's commission rate
+    const unsubProfile = onSnapshot(doc(db, "Partners", user.uid), (docSnap) => {
+      if (docSnap.exists()) {
+        setCommissionRate(docSnap.data().commissionRate || 10);
+      }
+    });
+
     const q = query(collection(db, "Clients"), where("referredBy", "==", user.uid));
     const unsubClients = onSnapshot(q, (snap) => {
-      const clientsData = snap.docs.map(d => {
+      setClients(snap.docs.map(d => {
         const data = d.data();
         return {
           id: d.id,
@@ -41,17 +49,26 @@ export default function Performance() {
           name: data.name,
           planType: data.subscription?.planType || "Free Plan",
           amountPaid: data.subscription?.amountPaid || 0,
-          commission: (data.subscription?.amountPaid || 0) * 0.10,
           activatedAt: data.subscription?.activatedAt?.toDate() || data.createdAt?.toDate() || new Date(),
           subscriptionStatus: data.subscription?.status || "inactive"
         };
-      });
-      setClients(clientsData);
+      }));
       setLoading(false);
     });
 
-    return () => unsubClients();
+    return () => {
+      unsubProfile();
+      unsubClients();
+    };
   }, [user]);
+
+  // Calculate commission dynamically based on partner's rate
+  const clientsWithCommission = useMemo(() => {
+    return clients.map(c => ({
+      ...c,
+      commission: (c.amountPaid || 0) * (commissionRate / 100)
+    }));
+  }, [clients, commissionRate]);
 
   // Filter Logic
   const filteredClients = useMemo(() => {
@@ -62,21 +79,21 @@ export default function Performance() {
     else if (timeRange === 'month') startDate.setMonth(now.getMonth() - 1);
     else if (timeRange === 'year') startDate.setFullYear(now.getFullYear() - 1);
     
-    return clients.filter(c => c.amountPaid > 0 && c.activatedAt >= startDate);
-  }, [clients, timeRange]);
+    return clientsWithCommission.filter(c => c.amountPaid > 0 && c.activatedAt >= startDate);
+  }, [clientsWithCommission, timeRange]);
 
   // Stats Calculation
   const totalEarnings = useMemo(() => {
-    return clients.filter(c => c.amountPaid > 0).reduce((sum, c) => sum + c.commission, 0);
-  }, [clients]);
+    return clientsWithCommission.filter(c => c.amountPaid > 0).reduce((sum, c) => sum + c.commission, 0);
+  }, [clientsWithCommission]);
 
   const thisMonthEarnings = useMemo(() => {
     return filteredClients.reduce((sum, c) => sum + c.commission, 0);
   }, [filteredClients]);
 
   const activeSubscriptions = useMemo(() => {
-    return clients.filter(c => c.subscriptionStatus === 'active').length;
-  }, [clients]);
+    return clientsWithCommission.filter(c => c.subscriptionStatus === 'active').length;
+  }, [clientsWithCommission]);
 
   const filterOptions = [
     { value: "week", label: "This week" },
@@ -91,7 +108,7 @@ export default function Performance() {
     </div>
   );
 
-  const earningsData = clients.filter(c => c.amountPaid > 0);
+  const earningsData = clientsWithCommission.filter(c => c.amountPaid > 0);
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-full animate-in fade-in duration-500 pb-10">
@@ -179,7 +196,7 @@ export default function Performance() {
             <p className="w-1/4">User</p>
             <p className="w-1/5">Plan</p>
             <p className="w-1/6">Amount</p>
-            <p className="w-1/6">Commission (10%)</p>
+            <p className="w-1/6">Commission ({commissionRate}%)</p>
             <p className="w-1/6">Credited On</p>
             <p className="w-1/12 text-right">Status</p>
           </div>

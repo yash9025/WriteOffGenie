@@ -97,6 +97,10 @@ export default function PartnerDetail() {
   // Modal & Processing States
   const [processing, setProcessing] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
+  
+  // Commission Rate Edit State
+  const [editingCommission, setEditingCommission] = useState(false);
+  const [newCommissionRate, setNewCommissionRate] = useState(10);
 
   useEffect(() => {
     if (!partnerId) return;
@@ -160,6 +164,26 @@ export default function PartnerDetail() {
         setProcessing(false);
         setShowStatusModal(false);
      });
+  };
+
+  // Update Commission Rate
+  const handleUpdateCommission = async () => {
+    if (newCommissionRate < 1 || newCommissionRate > 100) {
+      toast.error('Commission rate must be between 1 and 100');
+      return;
+    }
+
+    setProcessing(true);
+    const fn = httpsCallable(getFunctions(), 'updateCommissionRate');
+
+    toast.promise(fn({ partnerId, commissionRate: newCommissionRate }), {
+      loading: 'Updating commission rate...',
+      success: 'Commission rate updated successfully!',
+      error: (err) => `Failed: ${err.message}`
+    }).finally(() => {
+      setProcessing(false);
+      setEditingCommission(false);
+    });
   };
 
   const formatDate = (date) => {
@@ -234,6 +258,58 @@ export default function PartnerDetail() {
                </div>
             </div>
 
+            {/* Commission Rate Section */}
+            <div className="mt-8 pb-8 border-b border-slate-50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Commission Rate</p>
+                  {editingCommission ? (
+                    <div className="flex items-center gap-3 mt-2">
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={newCommissionRate}
+                        onChange={(e) => setNewCommissionRate(parseInt(e.target.value) || 10)}
+                        className="w-20 px-3 py-2 text-sm font-bold text-slate-900 border border-slate-200 rounded-lg focus:outline-none focus:border-[#011C39]"
+                      />
+                      <span className="text-sm font-bold text-slate-500">%</span>
+                      <button
+                        onClick={handleUpdateCommission}
+                        disabled={processing}
+                        className="px-3 py-2 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {processing ? <Loader2 size={14} className="animate-spin" /> : "Save"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingCommission(false);
+                          setNewCommissionRate(data?.commissionRate || 10);
+                        }}
+                        className="px-3 py-2 bg-slate-100 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <p className="text-2xl font-black text-emerald-600">{data?.commissionRate || 10}%</p>
+                      <button
+                        onClick={() => {
+                          setNewCommissionRate(data?.commissionRate || 10);
+                          setEditingCommission(true);
+                        }}
+                        className="px-3 py-1.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-2">This partner earns {data?.commissionRate || 10}% commission on each referred subscription</p>
+            </div>
+
             {/* Earnings Summary */}
             <div className="mt-8">
               <p className="text-sm font-bold text-slate-400 mb-4">Earnings Summary</p>
@@ -268,28 +344,28 @@ export default function PartnerDetail() {
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-white rounded-lg shadow-sm text-blue-600"><Building2 size={20}/></div>
                             <div>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Bank Name</p>
-                              <p className="text-sm font-bold text-slate-900">{bank.bankName}</p>
+                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Company Name</p>
+                              <p className="text-sm font-bold text-slate-900">{bank.companyName}</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-white rounded-lg shadow-sm text-purple-600"><Wallet size={20}/></div>
+                            <div>
+                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Routing Number</p>
+                              <p className="text-sm font-mono font-bold text-slate-900">•••••{bank.routingNumber?.slice(-4)}</p>
                             </div>
                         </div>
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-white rounded-lg shadow-sm text-emerald-600"><CreditCard size={20}/></div>
                             <div>
                               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Account Number</p>
-                              <p className="text-sm font-mono font-bold text-slate-900">{bank.accountNo}</p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-white rounded-lg shadow-sm text-purple-600"><Wallet size={20}/></div>
-                            <div>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">IFSC Code</p>
-                              <p className="text-sm font-mono font-bold text-slate-900">{bank.ifsc}</p>
+                              <p className="text-sm font-mono font-bold text-slate-900">••••••{bank.accountNumber?.slice(-4)}</p>
                             </div>
                         </div>
                       </div>
                       <div className="pt-4 mt-4 border-t border-slate-200/60 flex items-center gap-2">
-                         <span className="text-xs text-slate-400 font-medium">Account Holder:</span>
-                         <span className="text-xs font-bold text-slate-700 uppercase">{bank.accountHolderName}</span>
+                         <span className="text-xs text-slate-400 font-medium">Account Type:</span>
+                         <span className="text-xs font-bold text-slate-700 uppercase">{bank.accountType || 'Checking'}</span>
                          {bank.isDefault && <span className="ml-auto text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold uppercase">Default</span>}
                       </div>
                     </div>
@@ -339,9 +415,9 @@ export default function PartnerDetail() {
                                     </span>
                                 </td>
                                 <td className="px-6 py-4 font-medium text-slate-600">
-                                    {p.bankSnapshot?.bankName || p.bankName} 
+                                    {p.bankSnapshot?.companyName || 'Bank Account'} 
                                     <span className="text-slate-400 text-[10px] ml-1">
-                                        (..{p.bankSnapshot?.accountNo?.slice(-4) || p.bankAccountUsed?.slice(-4)})
+                                        (..{p.bankSnapshot?.accountNumber?.slice(-4) || p.bankAccountUsed?.slice(-4)})
                                     </span>
                                 </td>
                                 <td className="px-6 py-4 text-right text-slate-500">{formatDate(p.requestedAt)}</td>

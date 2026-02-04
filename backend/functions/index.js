@@ -14,12 +14,14 @@ import { registerClient as registerClientLogic } from "./controllers/clientContr
 import { requestWithdrawal as requestWithdrawalLogic } from "./controllers/payoutController.js";
 import { 
     toggleCAStatus as toggleCAStatusLogic, 
-    processWithdrawal as processWithdrawalLogic 
+    processWithdrawal as processWithdrawalLogic,
+    updateCommissionRate as updateCommissionRateLogic
 } from "./controllers/adminController.js";
 
 // 2. Export Pre-configured Triggers Directly
 // We export this directly because it is ALREADY defined as an onCall function in the controller
-export { sendReferralInvite } from "./controllers/emailController.js"; 
+export { sendReferralInvite } from "./controllers/emailController.js";
+export { sendCPAInvite, verifyInvite } from "./controllers/inviteController.js";
 
 // Set Max Instances
 setGlobalOptions({ maxInstances: 10 });
@@ -51,4 +53,8 @@ export const toggleCAStatus = onCall({ cors: true }, async (request) => {
 
 export const processWithdrawal = onCall({ cors: true }, async (request) => {
     return await processWithdrawalLogic(request.data, request);
+});
+
+export const updateCommissionRate = onCall({ cors: true }, async (request) => {
+    return await updateCommissionRateLogic(request.data, request);
 });
