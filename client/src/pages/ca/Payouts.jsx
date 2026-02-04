@@ -6,7 +6,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useSearch } from "../../context/SearchContext";
 import toast, { Toaster } from "react-hot-toast"; 
 import { Loader2, ChevronDown, X } from "lucide-react";
-import { RevenueIcon, PendingIcon, TotalPaidIcon, EmptyPayoutIllustration as EmptyIllustration } from "../../components/Icons";
+import { RevenueIcon, PendingIcon, WalletIcon, TotalPaidIcon, EmptyPayoutIllustration as EmptyIllustration } from "../../components/Icons";
 
 // --- STAT CARD ---
 const StatCard = ({ icon, label, value, description }) => (
@@ -109,7 +109,7 @@ export default function Payouts() {
     const amount = parseFloat(withdrawAmount);
     if (bankAccounts.length === 0) return toast.error("Please add bank details in Profile first");
     if (!selectedBank) return toast.error("Please select a bank account");
-    if (isNaN(amount) || amount < 500) return toast.error("Minimum withdrawal is $500");
+    if (isNaN(amount) || amount < 100) return toast.error("Minimum withdrawal is $100");
     if (amount > currentBalance) return toast.error("Insufficient balance");
 
     setIsRequesting(true);

@@ -5,7 +5,7 @@ import { db } from "../../services/firebase";
 import toast, { Toaster } from "react-hot-toast";
 import { 
   Loader2, X, Search,
-  Wallet, Building2, User
+  Building2, User
 } from "lucide-react";
 
 
@@ -168,7 +168,7 @@ const WithdrawalModal = ({ payout, onClose, onAction }) => {
            <div>
               <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-4">Withdrawal Details</h4>
               <div className="grid grid-cols-3 gap-6">
-                 <div><p className="text-xs text-slate-400 font-medium mb-1">Requested amount</p><p className="text-lg font-bold text-slate-900">₹{payout.amount.toLocaleString()}</p></div>
+                 <div><p className="text-xs text-slate-400 font-medium mb-1">Requested amount</p><p className="text-lg font-bold text-slate-900">${payout.amount.toLocaleString()}</p></div>
                  <div><p className="text-xs text-slate-400 font-medium mb-1">Request date</p><p className="text-sm font-bold text-slate-900">{formatDate(payout.requestedAt)}</p></div>
                  <div><p className="text-xs text-slate-400 font-medium mb-1">Status</p>{getStatusBadge(payout.status)}</div>
               </div>
@@ -361,7 +361,6 @@ export default function WithdrawalManagement() {
             <h1 className="text-2xl font-bold text-slate-900">Withdrawals</h1>
             <p className="text-sm text-slate-500 mt-1">Review, approve, and track CA withdrawal requests</p>
         </div>
-        {/* Request Withdrawal Button removed per instruction */}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -370,7 +369,7 @@ export default function WithdrawalManagement() {
                 <p className="text-sm text-slate-400 font-medium">Pending Amount</p>
                 <div className="p-2.5 rounded-full bg-[rgba(77,124,254,0.1)]"><RevenueIcon /></div>
             </div>
-            <h3 className="text-3xl font-bold text-slate-900">₹{stats.pending.toLocaleString()}</h3>
+            <h3 className="text-3xl font-bold text-slate-900">${stats.pending.toLocaleString()}</h3>
             <p className="text-[10px] text-slate-400 mt-2">Total value of withdrawals awaiting action</p>
         </div>
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
@@ -378,7 +377,7 @@ export default function WithdrawalManagement() {
                 <p className="text-sm text-slate-400 font-medium">Paid Amount</p>
                 <div className="p-2.5 rounded-full bg-[rgba(77,124,254,0.1)]"><WithdrawalIcon /></div>
             </div>
-            <h3 className="text-3xl font-bold text-slate-900">₹{stats.paid.toLocaleString()}</h3>
+            <h3 className="text-3xl font-bold text-slate-900">${stats.paid.toLocaleString()}</h3>
             <p className="text-[10px] text-slate-400 mt-2">Total withdrawals completed in selected period</p>
         </div>
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
@@ -386,7 +385,7 @@ export default function WithdrawalManagement() {
                 <p className="text-sm text-slate-400 font-medium">Rejected Amount</p>
                 <div className="p-2.5 rounded-full bg-[rgba(77,124,254,0.1)]"><CommissionIcon /></div>
             </div>
-            <h3 className="text-3xl font-bold text-slate-900">₹{stats.rejected.toLocaleString()}</h3>
+            <h3 className="text-3xl font-bold text-slate-900">${stats.rejected.toLocaleString()}</h3>
             <p className="text-[10px] text-slate-400 mt-2">Total value of rejected withdrawals</p>
         </div>
       </div>
@@ -409,7 +408,7 @@ export default function WithdrawalManagement() {
                 <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
                   <td className="py-5 px-6 text-sm font-medium text-slate-600">{formatDate(p.requestedAt)}</td>
                   <td className="py-5 px-6 text-sm font-medium text-slate-900">{p.partnerName}</td>
-                  <td className="py-5 px-6 text-sm font-bold text-slate-900">₹{p.amount.toLocaleString()}</td>
+                  <td className="py-5 px-6 text-sm font-bold text-slate-900">${p.amount.toLocaleString()}</td>
                   <td className="py-5 px-6 text-sm text-slate-600 flex items-center gap-1">
                       <span className="font-medium">{p.bankSnapshot?.bankName || "Unknown Bank"}</span>
                       <span className="text-slate-400 text-xs">•••• {p.bankSnapshot?.accountNo?.slice(-4) || "0000"}</span>

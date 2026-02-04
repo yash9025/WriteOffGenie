@@ -120,38 +120,38 @@ export default function CAManagement() {
 
                      {/* Earnings */}
                      <td className="py-5 px-6">
-                        <span className="text-sm font-bold text-slate-900">₹{(ca.stats?.totalEarnings || 0).toLocaleString()}</span>
+                        <span className="text-sm font-bold text-slate-900">${(ca.stats?.totalEarnings || 0).toLocaleString()}</span>
                      </td>
 
                      {/* Status Badge */}
                      <td className="py-5 px-6 text-center">
                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${
-                            isActive 
-                            ? "bg-emerald-50 text-emerald-600" 
-                            : "bg-red-50 text-red-600"
+                           isActive 
+                           ? "bg-emerald-50 text-emerald-600" 
+                           : "bg-red-50 text-red-600"
                         }`}>
-                            {isActive ? "Active" : "Inactive"}
+                           {isActive ? "Active" : "Inactive"}
                         </span>
                      </td>
 
                      {/* Actions */}
                      <td className="py-5 px-6 text-right">
                         <div className="flex items-center justify-end gap-3">
-                            <button 
-                                onClick={() => toggleStatus(ca.id, ca.status)}
-                                disabled={processing === ca.id}
-                                className="p-1.5 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100 cursor-pointer"
-                                title={isActive ? "Disable Account" : "Activate Account"}
-                            >
-                                {processing === ca.id ? <Loader2 size={16} className="animate-spin"/> : (isActive ? <Ban size={16}/> : <CheckCircle2 size={16}/>)}
-                            </button>
+                           <button 
+                               onClick={() => toggleStatus(ca.id, ca.status)}
+                               disabled={processing === ca.id}
+                               className="p-1.5 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100 cursor-pointer"
+                               title={isActive ? "Disable Account" : "Activate Account"}
+                           >
+                               {processing === ca.id ? <Loader2 size={16} className="animate-spin"/> : (isActive ? <Ban size={16}/> : <CheckCircle2 size={16}/>)}
+                           </button>
 
-                            <button 
-                                onClick={() => goToPartnerDetail(ca.id)}
-                                className="px-5 py-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all shadow-sm cursor-pointer"
-                            >
-                                View
-                            </button>
+                           <button 
+                               onClick={() => goToPartnerDetail(ca.id)}
+                               className="px-5 py-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all shadow-sm cursor-pointer"
+                           >
+                               View
+                           </button>
                         </div>
                      </td>
                    </tr>

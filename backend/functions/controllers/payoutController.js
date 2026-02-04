@@ -11,8 +11,8 @@ export const requestWithdrawal = async (data, auth) => {
   const userId = auth.uid;
 
   // 2. Validation
-  if (!amount || amount < 500) {
-    throw new HttpsError("invalid-argument", "Minimum withdrawal amount is $500.");
+  if (!amount || amount < 100) {
+    throw new HttpsError("invalid-argument", "Minimum withdrawal amount is $100.");
   }
 
   if (!bankAccountId || !bankSnapshot) {
