@@ -4,10 +4,10 @@ import { Link } from "react-router-dom";
 import { Copy, Check, Loader2, Link as LinkIcon, Mail } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import { db } from "../../services/firebase";
-import { getFunctions, httpsCallable } from "firebase/functions"; // 1. Import Functions
+import { getFunctions, httpsCallable } from "firebase/functions"; 
 import { useAuth } from "../../context/AuthContext";
 import { useSearch } from "../../context/SearchContext";
-import { RevenueIcon ,  WithdrawalIcon , SubscriptionIcon ,UsersIcon } from "../../components/Icons";
+import { RevenueIcon, WithdrawalIcon, SubscriptionIcon, UsersIcon } from "../../components/Icons";
 
 // --- STAT CARD ---
 const StatCard = ({ title, value, description, icon: Icon, isLoading }) => (
@@ -44,21 +44,26 @@ function Dashboard() {
   useEffect(() => {
     if (authLoading || !user) return;
 
+    // Real-time listener for Partner Profile (Stats & Balance)
     const unsubProfile = onSnapshot(doc(db, "Partners", user.uid), (docSnap) => {
-      if (docSnap.exists()) setProfile(docSnap.data());
+      if (docSnap.exists()) {
+          setProfile(docSnap.data());
+      }
       setDataLoading(false);
     });
 
+    // Fetch list of Referred Clients
     const fetchReferrals = async () => {
       try {
         const q = query(collection(db, "Clients"), where("referredBy", "==", user.uid));
         const querySnapshot = await getDocs(q);
         const clients = querySnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        // Sort by newest first
         clients.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
         setReferrals(clients);
       } catch (err) { 
-        console.error(err);
-        toast.error('Unable to load referral data');
+        console.error("Error fetching referrals:", err);
+        // Don't block UI on this error, just log it
       }
     };
 
@@ -66,8 +71,12 @@ function Dashboard() {
     return () => unsubProfile();
   }, [user, authLoading]);
 
+  // Derived Values
   const totalReferred = profile?.stats?.totalReferred || 0;
   const totalSubscribed = profile?.stats?.totalSubscribed || 0;
+  
+  // Construct the Referral Link for Display/Copying
+  // Uses the "Bridge Page" URL structure we built earlier
   const referralLink = `https://writeoffgenie.ai/join?ref=${profile?.referralCode || ''}`;
 
   const copyLink = () => {
@@ -78,11 +87,15 @@ function Dashboard() {
     setTimeout(() => setCopied(false), 2500);
   };
 
-  
   const handleSendInvite = async () => {
     if (!inviteEmail) {
       toast.error('Please enter a recipient email');
       return;
+    }
+
+    if (!profile?.referralCode) {
+        toast.error('Referral code not found. Please contact support.');
+        return;
     }
 
     // Validation
@@ -99,17 +112,19 @@ function Dashboard() {
       const functions = getFunctions();
       const sendInvite = httpsCallable(functions, 'sendReferralInvite');
 
+      // ⚠️ FIX: Sending 'referralCode' instead of 'referralLink'
+      // The backend builds the secure link automatically
       await sendInvite({
         email: inviteEmail,
-        senderName: profile?.name || "Your CA",
-        referralLink: referralLink
+        senderName: profile?.name || "Your Accountant",
+        referralCode: profile.referralCode // Pass just the code
       });
 
       toast.success(`Invite sent to ${inviteEmail}`, { id: toastId });
       setInviteEmail(""); // Reset input
 
     } catch (error) {
-      console.error(error);
+      console.error("Invite Error:", error);
       toast.error(error.message || "Failed to send invite.", { id: toastId });
     } finally {
       setSendingInvite(false);
@@ -122,7 +137,7 @@ function Dashboard() {
     return referrals.filter(client => {
       const email = (client.email || '').toLowerCase();
       const name = (client.name || '').toLowerCase();
-      const plan = (client.subscription?.plan || 'free plan').toLowerCase();
+      const plan = (client.subscription?.planType || 'free').toLowerCase();
       return email.includes(searchLower) || name.includes(searchLower) || plan.includes(searchLower);
     });
   }, [referrals, searchQuery]);
@@ -169,7 +184,7 @@ function Dashboard() {
             <p className="text-[#111111] text-sm font-semibold mb-2">Your referral link</p>
             <div className="border border-[#E3E6EA] rounded-lg px-3 py-2.5 flex items-center gap-3 bg-slate-50/50">
               <LinkIcon size={16} className="text-[#9499A1] shrink-0" />
-              <p className="text-[#111111] text-sm truncate flex-1 font-medium">{referralLink}</p>
+              <p className="text-[#111111] text-sm truncate flex-1 font-medium select-all">{referralLink}</p>
             </div>
           </div>
           <p className="text-[#9499A1] text-xs leading-relaxed">
@@ -177,7 +192,8 @@ function Dashboard() {
           </p>
           <button
             onClick={copyLink}
-            className="bg-[#011C39] hover:bg-[#022a55] text-white px-5 py-2.5 rounded-lg text-sm font-medium w-fit flex items-center gap-2 transition-all active:scale-95 cursor-pointer"
+            disabled={!profile?.referralCode}
+            className="bg-[#011C39] hover:bg-[#022a55] text-white px-5 py-2.5 rounded-lg text-sm font-medium w-fit flex items-center gap-2 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
           >
             {copied ? <Check size={16} /> : <Copy size={16} />}
             {copied ? "Copied!" : "Copy Link"}
@@ -200,6 +216,9 @@ function Dashboard() {
                 onChange={(e) => setInviteEmail(e.target.value)}
                 className="flex-1 text-sm outline-none placeholder:text-[#9CA3AF] bg-transparent"
                 disabled={sendingInvite}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSendInvite();
+                }}
               />
               <Mail size={16} className="text-[#9499A1] shrink-0" />
             </div>
@@ -209,7 +228,7 @@ function Dashboard() {
           </p>
           <button
             onClick={handleSendInvite}
-            disabled={sendingInvite}
+            disabled={sendingInvite || !inviteEmail}
             className="bg-[#011C39] hover:bg-[#022a55] text-white px-5 py-2.5 rounded-lg text-sm font-medium w-fit flex items-center gap-2 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed cursor-pointer"
           >
             {sendingInvite ? (
@@ -261,12 +280,12 @@ function Dashboard() {
                   
                   <p className="w-full md:w-1/4 text-[#111111] text-sm md:text-sm mb-2 md:mb-0 flex items-center gap-2">
                     <span className="md:hidden text-[#9499A1] text-xs">Plan:</span>
-                    {planName}
+                    <span className="capitalize">{planName}</span>
                   </p>
                   
                   <div className="w-full md:w-1/6 text-left md:text-center mb-2 md:mb-0">
-                    <span className="bg-[#ECFDF5] text-[#059669] px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide border border-[#A7F3D0]">
-                      Active
+                    <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide border ${hasSubscription ? 'bg-[#ECFDF5] text-[#059669] border-[#A7F3D0]' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+                      {hasSubscription ? 'Active' : 'Free'}
                     </span>
                   </div>
                   

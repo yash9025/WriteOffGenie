@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Opening WriteOffGenie...</title>
+    
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+
+    <meta property="og:title" content="Join WriteOffGenie">
+    <meta property="og:description" content="Tap to complete your signup.">
+    <meta property="og:image" content="https://writeoffgenie.ai/logo_writeoffgenie.png">
+
+    <style>
+        body {
+            font-family: -apple-system, system-ui, Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f9fafb;
+            text-align: center;
+            padding: 20px;
+        }
+        .logo { width: 80px; height: 80px; margin-bottom: 24px; }
+        .spinner {
+            border: 3px solid rgba(1, 28, 57, 0.1);
+            width: 32px; height: 32px; border-radius: 50%;
+            border-left-color: #011C39;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        h2 { color: #011C39; margin: 0 0 10px 0; font-size: 20px; font-weight: 600; }
+        p { color: #6b7280; font-size: 14px; margin: 0 0 30px 0; max-width: 300px; line-height: 1.5; }
+        .btn {
+            display: none;
+            padding: 12px 30px;
+            background-color: #011C39; color: white;
+            text-decoration: none; border-radius: 8px;
+            font-weight: 500; font-size: 15px;
+            transition: transform 0.2s;
+        }
+    </style>
+</head>
+<body>
+
+    <img src="../logo_writeoffgenie.svg" alt="Logo" class="logo" onerror="this.style.display='none'">
+    
+    <div class="spinner"></div>
+    <h2 id="status">Launching App...</h2>
+    <p>Connecting your invite code.</p>
+
+    <a id="manual-btn" href="#" class="btn">Open App</a>
+
+    <script>
+        // --- 1. CONFIGURATION ---
+        // ⚠️ YOUR SPECIFIC DEEP LINK STRUCTURE
+        const SCHEME_PREFIX = "writeoffgenie://writeoffgenie.com/signuppage";
+        
+        // TODO: Replace with Real IDs
+        const PLAY_STORE = "https://play.google.com/store/apps/details?id=com.writeoffgenie";
+        const APP_STORE = "https://apps.apple.com/us/app/writeoffgenie/id123456789"; 
+        const WEB_FALLBACK = "https://writeoffgenie.ai/signup"; 
+
+        // --- 2. LOGIC ---
+        const params = new URLSearchParams(window.location.search);
+        let rawCode = params.get('ref') || params.get('code') || '';
+        
+        // Sanitize Input
+        const refCode = encodeURIComponent(rawCode);
+        
+        // ✅ BUILD THE EXACT URL YOU REQUESTED
+        // Result: writeoffgenie://writeoffgenie.com/signuppage?ref=CA-5ECA81
+        const deepLink = `${SCHEME_PREFIX}?ref=${refCode}`;
+        
+        // Update Manual Button
+        const btn = document.getElementById('manual-btn');
+        btn.href = deepLink;
+
+        // Clipboard Backup (For iOS/Reliability)
+        if (rawCode && navigator.clipboard) {
+            navigator.clipboard.writeText(rawCode).catch(() => {});
+        }
+
+        // OS Detection
+        const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+        const isAndroid = /android/i.test(userAgent);
+        const isIOS = /iPad|iPhone|iPod/.test(userAgent) && !window.MSStream;
+        const isMobile = isAndroid || isIOS;
+
+        if (isMobile) {
+            const start = Date.now();
+            
+            // A. Attempt to Open App
+            window.location.href = deepLink;
+
+            // B. Fallback Timer (2 seconds)
+            setTimeout(() => {
+                const end = Date.now();
+                
+                // If browser stayed active (App didn't open)
+                if (end - start < 2500) {
+                    document.getElementById('status').innerText = "App not installed";
+                    btn.style.display = "inline-block";
+                    btn.innerText = "Download App";
+                    
+                    if (isAndroid) {
+                        // Pass 'ref' to Play Store
+                        const finalLink = `${PLAY_STORE}&referrer=${refCode}`;
+                        btn.href = finalLink;
+                        window.location.href = finalLink;
+                    } else {
+                        btn.href = APP_STORE;
+                        window.location.href = APP_STORE;
+                    }
+                }
+            }, 2000);
+        } else {
+            // Desktop Fallback
+            document.getElementById('status').innerText = "Redirecting to Website...";
+            setTimeout(() => {
+                // Keep the ref code for web signup
+                window.location.href = `${WEB_FALLBACK}?ref=${refCode}`;
+            }, 1000);
+        }
+    </script>
+</body>
+</html>
