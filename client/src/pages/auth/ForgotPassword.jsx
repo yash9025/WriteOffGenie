@@ -3,6 +3,8 @@ import { sendPasswordResetEmail } from "firebase/auth";
 import { Link } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { auth } from "../../services/firebase";
+import LoginImage from "../../assets/LoginImage.webp";
+import logo from "../../assets/logo_writeoffgenie.svg";
 
 function ForgotPassword() {
   const [email, setEmail] = useState("");
@@ -65,7 +67,7 @@ function ForgotPassword() {
         {/* LEFT SIDE - Image */}
         <div className="hidden lg:block flex-shrink-0">
           <img 
-            src="/LoginImage.png" 
+            src={LoginImage} 
             alt="Visual" 
             className="object-cover rounded-[32px]"
             style={{ width: '420px', height: '580px' }}
@@ -78,7 +80,7 @@ function ForgotPassword() {
           {/* Logo Section */}
           <div className="flex items-center gap-2.5 mb-12">
             <img 
-              src="/logo_writeoffgenie.png" 
+              src={logo} 
               alt="WriteOffGenie Logo" 
               className="w-12 h-14"
             />

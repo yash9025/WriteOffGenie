@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Users, TrendingUp, Wallet, LogOut, Menu, X
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import logo from "../assets/logo_writeoffgenie.svg";
 
 const AdminSidebarItem = ({ icon: Icon, label, path, active, onClick }) => (
   <Link
@@ -65,7 +66,7 @@ export default function AdminSidebar({ children }) {
         <div className="flex items-center justify-between py-6 px-4">
           <div className="flex items-center gap-1.5">
             <img 
-              src="/logo_writeoffgenie.png" 
+              src={logo} 
               alt="WriteOffGenie Logo" 
               className="w-10 h-12"
             />

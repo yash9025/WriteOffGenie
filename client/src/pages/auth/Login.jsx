@@ -3,6 +3,8 @@ import { signInWithEmailAndPassword } from "firebase/auth";
 import { useNavigate, Link } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { auth } from "../../services/firebase";
+import LoginImage from "../../assets/LoginImage.webp";
+import logo from "../../assets/logo_writeoffgenie.svg";
 
 function Login() {
   const [loading, setLoading] = useState(false);
@@ -53,25 +55,25 @@ function Login() {
       </div>
 
       {/* Main Content */}
-      <div className="relative z-10 flex items-center justify-between w-full max-w-[1600px] px-20 lg:px-32 xl:px-48">
+      <div className="relative z-10 flex items-center justify-between w-full max-w-400 px-20 lg:px-32 xl:px-48">
         
         {/* LEFT SIDE - Image */}
-        <div className="hidden lg:block flex-shrink-0">
+        <div className="hidden lg:block shrink-0">
           <img 
-            src="/LoginImage.png" 
+            src={LoginImage} 
             alt="Login Visual" 
-            className="object-cover rounded-[32px]"
+            className="object-cover rounded-4xl"
             style={{ width: '420px', height: '580px' }}
           />
         </div>
 
         {/* RIGHT SIDE - Form Section */}
-        <div className="flex flex-col items-center w-full max-w-[440px]">
+        <div className="flex flex-col items-center w-full max-w-110">
           
           {/* Logo Section */}
           <div className="flex items-center gap-2.5 mb-12">
             <img 
-              src="/logo_writeoffgenie.png" 
+              src={logo} 
               alt="WriteOffGenie Logo" 
               className="w-12 h-14"
             />

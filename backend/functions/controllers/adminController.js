@@ -13,19 +13,31 @@ export const toggleCAStatus = async (data, context) => {
     const { targetUserId, action } = data; 
     
     const isDisabled = action === 'inactive' || action === 'suspend';
+    const newStatus = isDisabled ? 'inactive' : 'active';
 
     try {
-        // 1. Auth Level Lock (Prevents Login immediately)
-        // isDisabled = true prevents the user from logging in via Firebase Auth
-        await getAuth().updateUser(targetUserId, { disabled: isDisabled });
+        // Create a list of tasks to run simultaneously
+        const tasks = [];
 
-        // 2. Database Level Lock (Visual Status)
-        await db.collection("Partners").doc(targetUserId).update({
-            status: isDisabled ? 'inactive' : 'active',
-            adminNote: `Account marked ${isDisabled ? 'inactive' : 'active'} by Admin on ${new Date().toISOString()}`
-        });
+        // Task 1: Lock/Unlock Login Access (Auth)
+        tasks.push(getAuth().updateUser(targetUserId, { disabled: isDisabled }));
+
+        // Task 2: Update Visual Status (Firestore)
+        tasks.push(db.collection("Partners").doc(targetUserId).update({
+            status: newStatus,
+            adminNote: `Account marked ${newStatus} by Admin on ${new Date().toISOString()}`
+        }));
+
+        // Task 3: Security - If disabling, invalidates current session immediately
+        if (isDisabled) {
+            tasks.push(getAuth().revokeRefreshTokens(targetUserId));
+        }
+
+        // This cuts the response time significantly because we don't wait for one to finish before starting the next.
+        await Promise.all(tasks);
 
         return { success: true };
+
     } catch (error) {
         console.error("Toggle Status Error:", error);
         throw new https.HttpsError('internal', 'Action failed.');

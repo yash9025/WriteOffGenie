@@ -1,5 +1,5 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { Resend } from "resend";
+import sgMail from "@sendgrid/mail";
 import crypto from "crypto";
 import admin from "firebase-admin";
 
@@ -45,7 +45,8 @@ export const verifyInviteToken = (token) => {
 
 // Cloud Function to send CPA invite
 export const sendCPAInvite = onCall({ cors: true }, async (request) => {
-  const resend = new Resend(process.env.RESEND_EMAIL_API_KEY);
+  // Initialize SendGrid with API key
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
   // 1. Auth Check: Ensure user is logged in and is an admin
   if (!request.auth) {
@@ -102,10 +103,10 @@ export const sendCPAInvite = onCall({ cors: true }, async (request) => {
       token: inviteToken
     });
 
-    // 8. Send Email via Resend
-    const data = await resend.emails.send({
-      from: 'WriteOffGenie <onboarding@resend.dev>', // Update to 'noreply@yourdomain.com' after verification
-      to: [email],
+    // 8. Send Email via SendGrid
+    const msg = {
+      to: email,
+      from: process.env.SENDGRID_VERIFIED_EMAIL || 'noreply@yourdomain.com', // MUST be verified in SendGrid
       subject: `You're Invited to Partner with WriteOffGenie`,
       html: `
         <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;">
@@ -136,9 +137,11 @@ export const sendCPAInvite = onCall({ cors: true }, async (request) => {
           </div>
         </div>
       `
-    });
+    };
 
-    return { success: true, message: "Invite sent successfully!", id: data.id };
+    const response = await sgMail.send(msg);
+
+    return { success: true, message: "Invite sent successfully!", id: response[0].headers['x-message-id'] };
 
   } catch (error) {
     console.error("Send Invite Error:", error);

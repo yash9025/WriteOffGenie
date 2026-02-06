@@ -293,7 +293,7 @@ export default function Payouts() {
               <h3 className="text-[#111111] text-xl font-bold">Request withdrawal</h3>
               <button 
                 onClick={() => setShowWithdrawModal(false)} 
-                className="p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
+                className="p-2 hover:bg-slate-100 rounded-full text-slate-400 transition-colors cursor-pointer"
               >
                 <X size={20} />
               </button>
@@ -318,7 +318,7 @@ export default function Payouts() {
                 <label className="text-[#111111] text-sm font-medium">Withdrawal amount</label>
                 <input 
                   type="number" 
-                  placeholder="Enter amount (min $500)" 
+                  placeholder="Enter amount (min $100)" 
                   value={withdrawAmount}
                   onChange={(e) => setWithdrawAmount(e.target.value)}
                   className="w-full border border-[#E2E8F0] rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-[#011C39] transition-all"
@@ -381,14 +381,14 @@ export default function Payouts() {
             <div className="flex gap-4 pt-2">
               <button 
                 onClick={() => { setShowWithdrawModal(false); setShowBankDropdown(false); }}
-                className="flex-1 py-3 border border-[#E2E8F0] rounded-lg text-[#64748B] text-sm font-medium hover:bg-slate-50 transition-colors"
+                className="cursor-pointer flex-1 py-3 border border-[#E2E8F0] rounded-lg text-[#64748B] text-sm font-medium hover:bg-slate-50 transition-colors"
               >
                 Cancel
               </button>
               <button 
                 onClick={handleWithdraw}
                 disabled={isRequesting || bankAccounts.length === 0}
-                className="flex-1 py-3 bg-[#011C39] rounded-lg text-white text-sm font-medium hover:bg-[#022a55] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all shadow-md active:scale-95"
+                className="cursor-pointer flex-1 py-3 bg-[#011C39] rounded-lg text-white text-sm font-medium hover:bg-[#022a55] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all shadow-md active:scale-95"
               >
                 {isRequesting && <Loader2 className="animate-spin" size={16} />}
                 {isRequesting ? "Processing..." : "Confirm Withdrawal"}

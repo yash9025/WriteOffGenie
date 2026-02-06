@@ -10,7 +10,7 @@ export const AuthProvider = ({ children }) => {
   const [role, setRole] = useState(() => localStorage.getItem("userRole"));
   const [loading, setLoading] = useState(true);
 
-  // 🚀 Added Logout function
+  // Added Logout function
   const logout = async () => {
     try {
       await signOut(auth);

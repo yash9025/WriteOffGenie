@@ -461,7 +461,7 @@ export default function MyProfile() {
 
 const Modal = ({ title, onClose, children }) => (
   <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-    <div className="bg-white rounded-2xl w-full max-w-[440px] p-6 shadow-2xl relative scale-100 transition-all">
+    <div className="bg-white rounded-2xl w-full max-w-110 p-6 shadow-2xl relative scale-100 transition-all">
       <div className="flex justify-between items-center mb-6">
         <h3 className="text-xl font-bold text-[#111]">{title}</h3>
         <button onClick={onClose} className="bg-slate-100 text-slate-500 rounded-full p-1.5 hover:bg-slate-200 transition-colors cursor-pointer">

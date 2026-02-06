@@ -7,80 +7,90 @@ export const requestWithdrawal = async (data, auth) => {
     throw new HttpsError("unauthenticated", "You must be logged in to request a payout.");
   }
 
-  const { amount, bankAccountId, bankSnapshot } = data;
+  const { amount, bankAccountId } = data; // Removed bankSnapshot from input (Security)
   const userId = auth.uid;
 
-  // 2. Validation
-  if (!amount || amount < 100) {
+  // 2. Strict Input Validation
+  const withdrawAmount = Number(amount);
+  if (isNaN(withdrawAmount) || withdrawAmount < 100) {
     throw new HttpsError("invalid-argument", "Minimum withdrawal amount is $100.");
   }
 
-  if (!bankAccountId || !bankSnapshot) {
-    throw new HttpsError("invalid-argument", "Please select a bank account for withdrawal.");
+  if (!bankAccountId) {
+    throw new HttpsError("invalid-argument", "Please select a bank account.");
   }
 
   const db = admin.firestore();
   const partnerRef = db.collection("Partners").doc(userId);
-  const payoutRef = db.collection("Payouts").doc();
+  const bankAccountRef = partnerRef.collection("BankAccounts").doc(bankAccountId);
+  
+  // Create reference ID early to use in multiple places if needed
+  const payoutRef = db.collection("Payouts").doc(); 
 
   try {
     return await db.runTransaction(async (t) => {
-      const partnerDoc = await t.get(partnerRef);
+      // 3. OPTIMIZATION: Parallel Reads (Performance)
+      // Fetch Partner and Bank Account simultaneously instead of sequentially
+      const [partnerDoc, bankAccountDoc] = await Promise.all([
+        t.get(partnerRef),
+        t.get(bankAccountRef)
+      ]);
 
       if (!partnerDoc.exists) {
         throw new HttpsError("not-found", "Partner record not found.");
       }
 
-      // 3. Verify bank account exists (optional - trust client snapshot but verify account exists)
-      const bankAccountRef = partnerRef.collection("BankAccounts").doc(bankAccountId);
-      const bankAccountDoc = await t.get(bankAccountRef);
-      
+      // 4. SECURITY: Source of Truth
+      // We verify the doc exists AND we use the data from the DB, not the client snapshot
       if (!bankAccountDoc.exists) {
-        throw new HttpsError("failed-precondition", "Selected bank account not found. Please select a valid account.");
+        throw new HttpsError("failed-precondition", "Selected bank account not found.");
       }
 
-      const balance = partnerDoc.data().walletBalance || 0;
-      const withdrawAmount = Number(amount);
+      const partnerData = partnerDoc.data();
+      const balance = partnerData.walletBalance || 0;
 
-      // 4. Financial Integrity Check
+      // 5. Financial Integrity Check
       if (withdrawAmount > balance) {
         throw new HttpsError("resource-exhausted", "Insufficient wallet balance.");
       }
 
-      // 5. DEDUCT balance immediately to prevent unlimited requests
+      // 6. Writes
+      // Deduct balance
       t.update(partnerRef, {
         walletBalance: admin.firestore.FieldValue.increment(-withdrawAmount)
       });
 
-      // 6. Create the Payout Request with bank snapshot
-      // The bankSnapshot contains all info admin needs to see which account CA selected
+      // Get trusted bank data from the database fetch
+      const bankData = bankAccountDoc.data();
+
+      // Create Payout Request
       t.set(payoutRef, {
-        partner_id: userId, 
-        partnerName: partnerDoc.data().name || "Partner",
+        partner_id: userId,
+        partnerName: partnerData.name || "Partner",
         amount: withdrawAmount,
         status: "pending",
         paymentMethod: "Bank Transfer",
-        
-        // Store the bank account reference and full snapshot
+
+        // SECURITY: Use server-side data, not client-side data
         bankAccountId: bankAccountId,
         bankSnapshot: {
-          companyName: bankSnapshot.companyName,
-          routingNumber: bankSnapshot.routingNumber,
-          accountNumber: bankSnapshot.accountNumber,
-          accountType: bankSnapshot.accountType
+          companyName: bankData.companyName,
+          routingNumber: bankData.routingNumber,
+          accountNumber: bankData.accountNumber,
+          accountType: bankData.accountType
         },
-        
-        // Legacy field for backward compatibility (masked last 4 digits)
-        bankAccountUsed: bankSnapshot.accountNumber?.slice(-4),
-        
+
+        // Legacy field
+        bankAccountUsed: bankData.accountNumber ? bankData.accountNumber.slice(-4) : "****",
+
         requestedAt: admin.firestore.FieldValue.serverTimestamp(),
         referenceId: payoutRef.id.substring(0, 10).toUpperCase()
       });
 
-      return { 
-        success: true, 
-        amount: withdrawAmount, 
-        referenceId: payoutRef.id.substring(0, 10).toUpperCase() 
+      return {
+        success: true,
+        amount: withdrawAmount,
+        referenceId: payoutRef.id.substring(0, 10).toUpperCase()
       };
     });
   } catch (error) {
@@ -89,3 +99,4 @@ export const requestWithdrawal = async (data, auth) => {
     throw new HttpsError("internal", error.message || "Payout processing failed.");
   }
 };
+

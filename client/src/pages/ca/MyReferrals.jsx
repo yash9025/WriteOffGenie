@@ -115,7 +115,7 @@ export default function MyReferrals() {
               </button>
               
               {filterOpen && (
-                <div className="absolute top-full mt-2 right-0 bg-white border border-[#E3E6EA] rounded-lg shadow-lg z-10 w-[150px] overflow-hidden">
+                <div className="absolute top-full mt-2 right-0 bg-white border border-[#E3E6EA] rounded-lg shadow-lg z-10 w-37.5 overflow-hidden">
                   {filterOptions.map(option => (
                     <button
                       key={option.value}

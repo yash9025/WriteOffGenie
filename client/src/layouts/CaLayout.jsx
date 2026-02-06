@@ -7,6 +7,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { SearchProvider, useSearch } from "../context/SearchContext";
 import Loader from "../components/Loader";
+import logo from "../assets/logo_writeoffgenie.svg";
 
 // --- SIDEBAR ITEM COMPONENT ---
 const SidebarItem = ({ icon: Icon, label, path, active, onClick }) => (
@@ -81,13 +82,13 @@ function CaSidebarLayout({ children }) {
       </button>
 
       {/* Sidebar */}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-[300px] bg-white flex flex-col transform transition-transform duration-300 lg:translate-x-0 lg:static border-r border-[#E3E6EA] ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside className={`fixed inset-y-0 left-0 z-50 w-75 bg-white flex flex-col transform transition-transform duration-300 lg:translate-x-0 lg:static border-r border-[#E3E6EA] ${isOpen ? "translate-x-0" : "-translate-x-full"}`}>
         
         {/* Logo Area with Close Button on Mobile */}
         <div className="flex items-center justify-between py-6 px-4">
           <div className="flex items-center gap-1.5">
             <img 
-              src="/logo_writeoffgenie.png" 
+              src={logo} 
               alt="WriteOffGenie Logo" 
               className="w-10 h-12"
             />
@@ -132,10 +133,10 @@ function CaSidebarLayout({ children }) {
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         {/* Top Navbar */}
-        <header className="bg-white border-b border-[#E3E6EA] px-4 md:px-6 py-4 flex items-center justify-between flex-shrink-0">
+        <header className="bg-white border-b border-[#E3E6EA] px-4 md:px-6 py-4 flex items-center justify-between shrink-0">
           {/* Search Bar - with left margin on mobile for hamburger menu */}
           <div className="flex items-center gap-2.5 px-4 py-3 border border-[#E2E6EA] rounded-full flex-1 max-w-[440px] ml-14 lg:ml-0">
-            <Search size={20} className="text-[#9D9D9D] flex-shrink-0" />
+            <Search size={20} className="text-[#9D9D9D] shrink-0" />
             <input 
               type="text" 
               placeholder={getSearchPlaceholder()}
@@ -146,7 +147,7 @@ function CaSidebarLayout({ children }) {
             {searchQuery && (
               <button 
                 onClick={clearSearch}
-                className="text-[#9D9D9D] hover:text-[#111111] transition-colors flex-shrink-0"
+                className="text-[#9D9D9D] hover:text-[#111111] transition-colors shrink-0"
               >
                 <X size={18} />
               </button>
@@ -154,7 +155,7 @@ function CaSidebarLayout({ children }) {
           </div>
 
           {/* User Profile */}
-          <div className="flex items-center gap-3 bg-[#F7F9FC] px-3 py-1.5 rounded-full cursor-pointer hover:bg-[#E3E6EA] transition-all flex-shrink-0 ml-4">
+          <div className="flex items-center gap-3 bg-[#F7F9FC] px-3 py-1.5 rounded-full cursor-pointer hover:bg-[#E3E6EA] transition-all shrink-0 ml-4">
             <div className="h-10 w-10 rounded-full bg-[#011C39] flex items-center justify-center text-white font-bold text-sm">
               {user?.displayName?.[0]?.toUpperCase() || 'CA'}
             </div>
@@ -174,8 +175,8 @@ function CaSidebarLayout({ children }) {
 
       {/* --- LOGOUT CONFIRMATION MODAL --- */}
       {showLogoutModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[20px] p-8 w-full max-w-[400px] shadow-2xl animate-in fade-in zoom-in duration-200 relative">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-100 flex items-center justify-center p-4">
+          <div className="bg-white rounded-[20px] p-8 w-full max-w-100 shadow-2xl animate-in fade-in zoom-in duration-200 relative">
             
             {/* Close Icon */}
             <button 

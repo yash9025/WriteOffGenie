@@ -1,29 +1,23 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { Resend } from "resend";
+import sgMail from "@sendgrid/mail";
 
-// ✅ Add { cors: true } here
 export const sendReferralInvite = onCall({ cors: true }, async (request) => {
-    // Initialize Resend inside the function where env var is available
-    const resend = new Resend(process.env.RESEND_EMAIL_API_KEY);
-    
-    // 1. Auth Check: Ensure user is logged in
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+
     if (!request.auth) {
         throw new HttpsError('unauthenticated', 'You must be logged in to send invites.');
     }
 
-    // 2. Extract Data
     const { email, referralLink, senderName } = request.data;
 
-    // 3. Validation
     if (!email || !referralLink) {
         throw new HttpsError('invalid-argument', 'Recipient email and referral link are required.');
     }
 
     try {
-        // 4. Send Email via Resend
-        const data = await resend.emails.send({
-            from: 'WriteOffGenie <onboarding@resend.dev>', // Update to 'noreply@yourdomain.com' after verification
-            to: [email],
+        const msg = {
+            to: email,
+            from: process.env.SENDGRID_VERIFIED_EMAIL || 'noreply@yourdomain.com',
             subject: `${senderName} invited you to join WriteOffGenie`,
             html: `
                 <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;">
@@ -48,12 +42,14 @@ export const sendReferralInvite = onCall({ cors: true }, async (request) => {
                     </div>
                 </div>
             `
-        });
+        };
 
-        return { success: true, message: "Invite sent successfully!", id: data.id };
+        const response = await sgMail.send(msg);
+
+        return { success: true, message: "Invite sent successfully!", id: response[0].headers['x-message-id'] };
 
     } catch (error) {
-        console.error("Resend Email Error:", error);
+        console.error("SendGrid Email Error:", error);
         throw new HttpsError('internal', 'Failed to send the invite email. Please try again.');
     }
 });
