@@ -85,7 +85,7 @@ export const sendCPAInvite = onCall({ cors: true }, async (request) => {
     // 6. Generate secure invite token
     const inviteToken = generateInviteToken(name, email, commission);
     // Use localhost for local testing, change to production URL when deploying
-    const baseUrl = process.env.FUNCTIONS_EMULATOR ? 'http://localhost:5173' : 'https://writeoffgenie.ai';
+    const baseUrl = process.env.FUNCTIONS_EMULATOR ? 'http://localhost:5173' : 'https://write-off-genie.vercel.app';
     const inviteLink = `${baseUrl}/register?token=${inviteToken}`;
 
     // 7. Store pending invite in Firestore
