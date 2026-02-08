@@ -3,6 +3,7 @@ import { signInWithEmailAndPassword } from "firebase/auth";
 import { useNavigate, Link } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { auth } from "../../services/firebase";
+import toast, { Toaster } from "react-hot-toast";
 import LoginImage from "../../assets/LoginImage.webp";
 import logo from "../../assets/logo_writeoffgenie.svg";
 
@@ -169,6 +170,7 @@ function Login() {
           </div>
         </div>
       </div>
+      <Toaster position="top-right" />
     </div>
   );
 }

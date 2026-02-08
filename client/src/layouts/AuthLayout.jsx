@@ -9,14 +9,19 @@ const AuthLayout = () => {
   // 1. Wait for Auth to finish loading
   if (loading) return <Loader />;
 
-  // 2. Redirect Logic: If already logged in, kick them to the right dashboard
+  // 2. Redirect Logic: If already logged in, redirect to appropriate dashboard
   if (user) {
-    if (role === "admin") {
-        return <Navigate to="/admin/dashboard" replace />;
+    if (role === "super_admin") {
+      return <Navigate to="/admin/dashboard" replace />;
+    }
+    if (role === "agent") {
+      return <Navigate to="/agent/dashboard" replace />;
+    }
+    if (role === "cpa") {
+      return <Navigate to="/dashboard" replace />;
     }
     
-    // Default everyone else (CAs, Clients, etc.) to the main Dashboard.
-    // The CaLayout will handle permission denials if they aren't supposed to be there.
+    // Fallback for unknown roles
     return <Navigate to="/dashboard" replace />;
   }
 

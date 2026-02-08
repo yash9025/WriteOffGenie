@@ -48,6 +48,7 @@ export const requestWithdrawal = async (data, auth) => {
 
       const partnerData = partnerDoc.data();
       const balance = partnerData.walletBalance || 0;
+      const partnerRole = partnerData.role || "ca"; // Get partner role for filtering
 
       // 5. Financial Integrity Check
       if (withdrawAmount > balance) {
@@ -66,7 +67,8 @@ export const requestWithdrawal = async (data, auth) => {
       // Create Payout Request
       t.set(payoutRef, {
         partner_id: userId,
-        partnerName: partnerData.name || "Partner",
+        partnerName: partnerData.name || partnerData.displayName || "Partner",
+        partnerRole: partnerRole, // Include role for easier filtering
         amount: withdrawAmount,
         status: "pending",
         paymentMethod: "Bank Transfer",

@@ -8,21 +8,19 @@ import toast, { Toaster } from "react-hot-toast";
 import LoginImage from "../../assets/LoginImage.webp";
 import logo from "../../assets/logo_writeoffgenie.svg"; 
 
-function Register() {
+function RegisterAgent() {
   const [searchParams] = useSearchParams();
   const [form, setForm] = useState({
     name: "",
     email: "",
     password: "",
     phone: "",
-    caRegNumber: "",
   });
 
   // Invite-only state
   const [inviteValid, setInviteValid] = useState(null); // null = loading, true = valid, false = invalid
   const [inviteData, setInviteData] = useState(null);
   const [inviteError, setInviteError] = useState("");
-  const [inviteType, setInviteType] = useState(null); // 'agent' or 'cpa'
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -43,16 +41,13 @@ function Register() {
         const verifyFn = httpsCallable(functions, "verifyInvite");
         const result = await verifyFn({ token });
         
-        if (result.data.valid) {
+        if (result.data.valid && result.data.inviteType === 'agent') {
           setInviteData({
             name: result.data.name,
             email: result.data.email,
-            commissionRate: result.data.commissionRate,
-            inviteType: result.data.inviteType, // 'agent' or 'cpa'
-            referredBy: result.data.referredBy, // ID of the admin or agent who sent invite
+            referredBy: result.data.referredBy,
             token: token
           });
-          setInviteType(result.data.inviteType || 'cpa');
           setForm(prev => ({
             ...prev,
             name: result.data.name,
@@ -61,7 +56,7 @@ function Register() {
           setInviteValid(true);
         } else {
           setInviteValid(false);
-          setInviteError("Invalid or expired invitation.");
+          setInviteError("Invalid agent invitation.");
         }
       } catch (err) {
         console.error("Verify Error:", err);
@@ -83,29 +78,19 @@ function Register() {
     setError("");
 
     try {
-      // Choose registration function based on invite type
-      const registerFnName = inviteType === 'agent' ? 'registerAgent' : 'registerCA';
-      const registerFn = httpsCallable(functions, registerFnName);
+      const registerFn = httpsCallable(functions, 'registerAgent');
       
       const payload = {
-        ...form,
+        name: form.name,
+        email: form.email,
+        password: form.password,
+        phone: form.phone,
         inviteToken: inviteData?.token
       };
       
-      // Add commission rate only for CPAs (agents have fixed 10%)
-      if (inviteType === 'cpa') {
-        payload.commissionRate = inviteData?.commissionRate || 10;
-      }
-      
       await registerFn(payload);
       await signInWithEmailAndPassword(auth, form.email, form.password);
-      
-      // Navigate based on role
-      if (inviteType === 'agent') {
-        navigate("/agent/dashboard");
-      } else {
-        navigate("/dashboard");
-      }
+      navigate("/agent/dashboard");
     } catch (err) {
       setError(err.message.replace("Firebase: ", "").replace("Error ", ""));
     }
@@ -136,7 +121,7 @@ function Register() {
         />
         <div 
           className="absolute rounded-full"
-          style={{ width: '700px', height: '700px', left: '80px', top: '150px', background: '#00D1A0' }}
+          style={{ width: '700px', height: '700px', left: '80px', top: '150px', background: '#4D7CFE' }}
         />
         <div 
           className="absolute rounded-full"
@@ -213,23 +198,19 @@ function Register() {
             {/* Header */}
             <div className="text-center mb-4">
               <h2 className="text-xl font-semibold text-[#111111] mb-0.5">
-                {inviteType === 'agent' ? 'Become an Agent Partner' : 'Become a CPA Partner'}
+                Become an Agent Partner
               </h2>
               <p className="text-xs text-[#9499A1]">
-                {inviteType === 'agent' 
-                  ? 'Join as an Agent and earn 10% commission on all referrals'
-                  : 'Sign up to start earning commissions today'
-                }
+                Join as an Agent and build your CPA network
               </p>
-              {inviteType === 'agent' ? (
-                <p className="text-xs text-[#4D7CFE] font-medium mt-1">
+              <div className="mt-2 px-4 py-2 bg-[#4D7CFE]/10 border border-[#4D7CFE]/20 rounded-lg">
+                <p className="text-xs text-[#4D7CFE] font-medium">
+                  Welcome, {inviteData?.name}
+                </p>
+                <p className="text-[10px] text-[#9499A1] mt-0.5">
                   Your commission rate: 10% (Fixed for Agents)
                 </p>
-              ) : inviteData?.commissionRate ? (
-                <p className="text-xs text-[#00C853] font-medium mt-1">
-                  Your commission rate: {inviteData.commissionRate}%
-                </p>
-              ) : null}
+              </div>
             </div>
 
             {/* Form */}
@@ -247,10 +228,10 @@ function Register() {
                   type="text" 
                   name="name"
                   placeholder="Enter your full name" 
-                  className={`w-full px-3 py-2 text-sm text-[#111111] border border-[#E3E6EA] rounded-lg outline-none transition-colors ${inviteData ? 'bg-slate-50 cursor-not-allowed' : 'bg-white focus:border-[#011C39]'}`}
+                  className="w-full px-3 py-2 text-sm text-[#111111] bg-slate-50 border border-[#E3E6EA] rounded-lg outline-none cursor-not-allowed transition-colors"
                   value={form.name}
                   onChange={handleChange}
-                  readOnly={!!inviteData}
+                  readOnly
                   required
                 />
               </div>
@@ -262,10 +243,10 @@ function Register() {
                   type="email" 
                   name="email"
                   placeholder="Enter your work email" 
-                  className={`w-full px-3 py-2 text-sm text-[#111111] border border-[#E3E6EA] rounded-lg outline-none transition-colors ${inviteData ? 'bg-slate-50 cursor-not-allowed' : 'bg-white focus:border-[#011C39]'}`}
+                  className="w-full px-3 py-2 text-sm text-[#111111] bg-slate-50 border border-[#E3E6EA] rounded-lg outline-none cursor-not-allowed transition-colors"
                   value={form.email}
                   onChange={handleChange}
-                  readOnly={!!inviteData}
+                  readOnly
                   required
                 />
               </div>
@@ -277,29 +258,12 @@ function Register() {
                   type="tel" 
                   name="phone"
                   placeholder="Enter your phone number" 
-                  className="w-full px-3 py-2 text-sm text-[#111111] bg-white border border-[#E3E6EA] rounded-lg outline-none focus:border-[#011C39] transition-colors"
+                  className="w-full px-3 py-2 text-sm text-[#111111] bg-white border border-[#E3E6EA] rounded-lg outline-none focus:border-[#4D7CFE] transition-colors"
                   value={form.phone}
                   onChange={handleChange}
                   required
                 />
               </div>
-
-              {/* CA Registration Number Field - Only for CPAs */}
-              {inviteType === 'cpa' && (
-                <div className="flex flex-col gap-0.5">
-                  <label className="text-xs font-medium text-[#111111]">
-                    CA Reg Number <span className="text-[#9499A1]">(Optional)</span>
-                  </label>
-                  <input 
-                    type="text" 
-                    name="caRegNumber"
-                    placeholder="Enter your CA registration number" 
-                    className="w-full px-3 py-2 text-sm text-[#111111] bg-white border border-[#E3E6EA] rounded-lg outline-none focus:border-[#011C39] transition-colors"
-                    value={form.caRegNumber}
-                    onChange={handleChange}
-                  />
-                </div>
-              )}
 
               {/* Password Field */}
               <div className="flex flex-col gap-0.5">
@@ -308,7 +272,7 @@ function Register() {
                   type="password" 
                   name="password"
                   placeholder="Create a password (min 8 characters)" 
-                  className="w-full px-3 py-2 text-sm text-[#111111] bg-white border border-[#E3E6EA] rounded-lg outline-none focus:border-[#011C39] transition-colors"
+                  className="w-full px-3 py-2 text-sm text-[#111111] bg-white border border-[#E3E6EA] rounded-lg outline-none focus:border-[#4D7CFE] transition-colors"
                   value={form.password}
                   onChange={handleChange}
                   required
@@ -320,11 +284,9 @@ function Register() {
               <button 
                 disabled={loading} 
                 type="submit"
-                className="w-full py-2.5 mt-2 text-sm font-semibold text-white bg-[#011C39] rounded-lg hover:bg-[#022a55] transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
+                className="w-full py-2.5 mt-2 text-sm font-semibold text-white bg-[#4D7CFE] rounded-lg hover:bg-[#3D6CED] transition-colors disabled:opacity-70 flex items-center justify-center gap-2"
               >
-                {loading ? <Loader2 className="animate-spin" size={18} /> : (
-                  inviteType === 'agent' ? 'Join as Agent' : 'Create CPA Account'
-                )}
+                {loading ? <Loader2 className="animate-spin" size={18} /> : 'Join as Agent'}
               </button>
             </form>
 
@@ -335,7 +297,7 @@ function Register() {
               </p>
               <Link 
                 to="/login"
-                className="w-full py-2 text-sm font-semibold text-[#011C39] bg-transparent border-2 border-[#011C39] rounded-lg hover:bg-[#011C39] hover:text-white transition-colors text-center"
+                className="w-full py-2 text-sm font-semibold text-[#4D7CFE] bg-transparent border-2 border-[#4D7CFE] rounded-lg hover:bg-[#4D7CFE] hover:text-white transition-colors text-center"
               >
                 Sign In
               </Link>
@@ -349,4 +311,4 @@ function Register() {
   );
 }
 
-export default Register;
+export default RegisterAgent;

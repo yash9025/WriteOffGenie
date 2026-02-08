@@ -73,14 +73,50 @@ export const registerClient = async (data, context) => {
         if (linkedCAId && paymentSuccess) {
             // Use partner's custom commission rate, or default to 10%
             const partnerCommissionRate = (partnerData?.commissionRate || 10) / 100;
-            const commission = PLAN_AMOUNT * partnerCommissionRate;
+            const cpaCommission = PLAN_AMOUNT * partnerCommissionRate;
             
+            // Update CPA stats and wallet
             await db.collection("Partners").doc(linkedCAId).update({
                 "stats.totalReferred": FieldValue.increment(1),
                 "stats.totalSubscribed": FieldValue.increment(1), 
-                "stats.totalEarnings": FieldValue.increment(commission),
-                "walletBalance": FieldValue.increment(commission)
+                "stats.totalEarnings": FieldValue.increment(cpaCommission),
+                "stats.totalRevenue": FieldValue.increment(PLAN_AMOUNT),
+                "walletBalance": FieldValue.increment(cpaCommission)
             });
+
+            // 7. AGENT COMMISSION LOGIC
+            // If the CPA was referred by an agent, give the agent their commission too
+            const agentId = partnerData?.referredBy;
+            if (agentId) {
+                // Check if referrer is an agent
+                const agentDoc = await db.collection("Partners").doc(agentId).get();
+                if (agentDoc.exists && agentDoc.data().role === 'agent') {
+                    const agentCommissionRate = (agentDoc.data().commissionRate || 10) / 100;
+                    const agentCommission = PLAN_AMOUNT * agentCommissionRate;
+                    
+                    // Update agent stats and wallet
+                    await db.collection("Partners").doc(agentId).update({
+                        "stats.totalEarnings": FieldValue.increment(agentCommission),
+                        "stats.totalRevenue": FieldValue.increment(PLAN_AMOUNT),
+                        "walletBalance": FieldValue.increment(agentCommission)
+                    });
+
+                    // Create transaction record for tracking
+                    await db.collection("Transactions").add({
+                        type: 'commission',
+                        amount: PLAN_AMOUNT,
+                        clientId: userRecord.uid,
+                        cpaId: linkedCAId,
+                        agentId: agentId,
+                        cpaCommission: cpaCommission,
+                        agentCommission: agentCommission,
+                        platformRevenue: PLAN_AMOUNT - cpaCommission - agentCommission,
+                        description: `Commission from client subscription`,
+                        status: 'completed',
+                        createdAt: FieldValue.serverTimestamp()
+                    });
+                }
+            }
         } else if (linkedCAId) {
              // If they registered but didn't subscribe, just count as a lead (Referred)
              await db.collection("Partners").doc(linkedCAId).update({

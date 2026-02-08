@@ -9,14 +9,16 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(() => auth.currentUser);
   const [role, setRole] = useState(() => localStorage.getItem("userRole"));
   const [loading, setLoading] = useState(true);
+  const [partnerData, setPartnerData] = useState(null); // Full partner profile
 
-  // Added Logout function
+  // Logout function
   const logout = async () => {
     try {
       await signOut(auth);
       localStorage.removeItem("userRole");
       setUser(null);
       setRole(null);
+      setPartnerData(null);
     } catch (error) {
       console.error("Logout error:", error);
     }
@@ -27,6 +29,7 @@ export const AuthProvider = ({ children }) => {
       if (!currentUser) {
         setUser(null);
         setRole(null);
+        setPartnerData(null);
         localStorage.removeItem("userRole");
         setLoading(false);
         return;
@@ -39,11 +42,15 @@ export const AuthProvider = ({ children }) => {
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists()) {
-          const fetchedRole = docSnap.data().role || "ca";
+          const data = docSnap.data();
+          const fetchedRole = data.role || "cpa"; // Default to cpa for backward compatibility
+          
           setRole(fetchedRole);
+          setPartnerData(data);
           localStorage.setItem("userRole", fetchedRole);
         } else {
           setRole("unknown");
+          setPartnerData(null);
         }
       } catch (error) {
         console.error("Role fetch error:", error);
@@ -55,9 +62,22 @@ export const AuthProvider = ({ children }) => {
     return () => unsubscribe();
   }, []);
 
-  // Pass logout into the value object
+  // Helper functions for role checks
+  const isSuperAdmin = () => role === "super_admin";
+  const isAgent = () => role === "agent";
+  const isCPA = () => role === "cpa";
+
   return (
-    <AuthContext.Provider value={{ user, role, loading, logout }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      role, 
+      loading, 
+      logout, 
+      partnerData,
+      isSuperAdmin,
+      isAgent,
+      isCPA
+    }}>
       {children}
     </AuthContext.Provider>
   );

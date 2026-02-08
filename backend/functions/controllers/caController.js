@@ -39,13 +39,28 @@ export const registerCA = async (data, context) => {
     
     if (!isUnique) throw new Error("System busy. Please try again.");
 
-    await db.collection("Partners").doc(userRecord.uid).set({
+    // Get referredBy from invite if available
+    let referredBy = null;
+    if (inviteToken) {
+      const inviteQuery = await db.collection("PendingInvites")
+        .where("email", "==", email)
+        .where("status", "==", "pending")
+        .get();
+      
+      if (!inviteQuery.empty) {
+        referredBy = inviteQuery.docs[0].data().invitedBy;
+      }
+    }
+
+    const partnerData = {
       name,
+      displayName: name,
       email, 
-      phone, 
+      phone,
+      phoneNumber: phone,
       caRegNumber: caRegNumber || "", 
       referralCode,
-      role: "ca", 
+      role: "cpa", 
       status: "active",
       commissionRate: commissionRate || 10, // Commission rate from invite (default 10%)
       createdAt: FieldValue.serverTimestamp(),
@@ -54,8 +69,15 @@ export const registerCA = async (data, context) => {
         totalReferred: 0,
         totalEarnings: 0, 
         totalSubscribed:0
-      } 
-    });
+      }
+    };
+
+    // Add referredBy only if it exists
+    if (referredBy) {
+      partnerData.referredBy = referredBy;
+    }
+
+    await db.collection("Partners").doc(userRecord.uid).set(partnerData);
 
     // Mark the invite as used if inviteToken was provided
     if (inviteToken) {
