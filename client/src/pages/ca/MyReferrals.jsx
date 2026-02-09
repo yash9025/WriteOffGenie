@@ -71,7 +71,7 @@ export default function MyReferrals() {
   });
 
   const handleCopyLink = () => {
-    const link = `https://writeoffgenie.ai/join?ref=${profile?.referralCode || ''}`;
+    const link = `https://writeoffgenie-link.vercel.app/join?ref=${profile?.referralCode || ''}`;
     navigator.clipboard.writeText(link);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);

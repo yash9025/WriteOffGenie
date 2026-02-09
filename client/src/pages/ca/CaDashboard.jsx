@@ -78,7 +78,7 @@ function Dashboard() {
   
   // Construct the Referral Link for Display/Copying
   // Uses the "Bridge Page" URL structure we built earlier
-  const referralLink = `https://writeoffgenie.ai/join?ref=${profile?.referralCode || ''}`;
+  const referralLink = `https://writeoffgenie-link.vercel.app/join?ref=${profile?.referralCode || ''}`;
 
   const copyLink = () => {
     if (!profile?.referralCode) return;
