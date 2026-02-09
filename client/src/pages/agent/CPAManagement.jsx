@@ -5,7 +5,7 @@ import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
 import { useSearch } from "../../context/SearchContext";
 import { useNavigate } from "react-router-dom";
-import { Eye, UserPlus, Loader2, DollarSign, TrendingUp, Activity, Users, X } from "lucide-react";
+import { Eye, UserPlus, Loader2, DollarSign, TrendingUp, Activity, Users, X } from "../../components/Icons";
 import toast, { Toaster } from "react-hot-toast";
 import StatCard from "../../components/common/StatCard";
 import DataTable from "../../components/common/DataTable";

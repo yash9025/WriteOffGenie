@@ -1,20 +1,6 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /transation_history/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-
-    match /pending_transation/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-
     
     // --- HELPER FUNCTIONS ---
     function isSignedIn() {
@@ -25,113 +11,125 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
     
-    function isAdmin() {
-      return isSignedIn() && request.auth.token.admin == true;
+    function getUserRole() {
+      return get(/databases/$(database)/documents/Partners/$(request.auth.uid)).data.role;
     }
     
-    function isPartner() {
-      return isSignedIn() && request.auth.token.role == 'partner';
+    function isSuperAdmin() {
+      return isSignedIn() && getUserRole() == 'super_admin';
+    }
+    
+    function isAgent() {
+      return isSignedIn() && getUserRole() == 'agent';
+    }
+    
+    function isCPA() {
+      return isSignedIn() && getUserRole() == 'cpa';
     }
     
     function isSafeUserUpdate() {
-      let forbidden = ['walletBalance', 'stats', 'role', 'status', 'referralCode', 'emailVerified', 'createdAt'];
-      let allowed = ['displayName', 'photoURL', 'phoneNumber', 'businessName', 'address'];
-      return request.resource.data.keys().hasOnly(allowed);
+      let forbidden = ['walletBalance', 'stats', 'role', 'status', 'referralCode', 'emailVerified', 'createdAt', 'referredBy', 'commissionRate'];
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(forbidden);
     }
     
-    function isSafeBusinessUpdate() {
-      let forbidden = ['ownerId', 'createdAt', 'verified'];
-      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(forbidden);
+    // --- PARTNERS COLLECTION (Super Admin, Agents, CPAs) ---
+    match /Partners/{partnerId} {
+      // Read: Users can read their own document, Super Admins read all, Agents read their CPAs
+      allow read: if isOwner(partnerId) 
+                  || isSuperAdmin() 
+                  || (isAgent() && resource.data.referredBy == request.auth.uid);
+      
+      // Create: Only through Cloud Functions (invite system)
+      allow create: if false;
+      
+      // Update: Users can update their own profile (restricted fields)
+      allow update: if isOwner(partnerId) && isSafeUserUpdate();
+      
+      // Delete: Only Super Admin
+      allow delete: if isSuperAdmin();
+    }
+    
+    // --- CLIENTS COLLECTION ---
+    match /Clients/{clientId} {
+      // Read: Client can read own, CPA can read their referrals, Agent can read CPAs' clients, Super Admin reads all
+      allow read: if isOwner(clientId) 
+                  || isSuperAdmin()
+                  || (isCPA() && resource.data.referredBy == request.auth.uid)
+                  || (isAgent() && get(/databases/$(database)/documents/Partners/$(resource.data.referredBy)).data.referredBy == request.auth.uid);
+      
+      // Write: Managed by Cloud Functions
+      allow write: if false;
+    }
+    
+    // --- TRANSACTIONS COLLECTION ---
+    match /Transactions/{transactionId} {
+      // Read: Super Admin, or if user is involved (as agent, cpa, or client)
+      allow read: if isSuperAdmin() 
+                  || resource.data.agentId == request.auth.uid
+                  || resource.data.cpaId == request.auth.uid
+                  || resource.data.clientId == request.auth.uid;
+      
+      // Write: Only Cloud Functions
+      allow write: if false;
+    }
+    
+    // --- WITHDRAWALS COLLECTION ---
+    match /Withdrawals/{withdrawalId} {
+      // Read: Own withdrawals or Super Admin
+      allow read: if isOwner(resource.data.partnerId) || isSuperAdmin();
+      
+      // Create: Agents and CPAs can request withdrawals
+      allow create: if (isAgent() || isCPA()) && request.resource.data.partnerId == request.auth.uid;
+      
+      // Update: Only Super Admin (for approval/rejection)
+      allow update: if isSuperAdmin();
+      
+      allow delete: if false;
+    }
+    
+    // --- PENDING INVITES COLLECTION ---
+    match /PendingInvites/{inviteId} {
+      // Read: Own invites or who sent them
+      allow read: if isOwner(resource.data.invitedBy) || isSuperAdmin();
+      
+      // Create: Super Admin can invite Agents/CPAs, Agents can invite CPAs
+      allow create: if (isSuperAdmin() && request.resource.data.inviteType in ['agent', 'cpa'])
+                    || (isAgent() && request.resource.data.inviteType == 'cpa' && request.resource.data.invitedBy == request.auth.uid);
+      
+      // Update/Delete: Only Cloud Functions
+      allow update, delete: if false;
+    }
+    
+    // --- LEGACY/TEMP COLLECTIONS (Keep for backward compatibility) ---
+    match /transation_history/{document} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
+
+    match /pending_transation/{document} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
     }
     
     // --- PUBLIC READ-ONLY COLLECTIONS ---
     match /category/{document} {
       allow create: if true;
       allow read: if true;
-      allow write: if true;
-      allow delete: if true;
+      allow write: if false;
+      allow delete: if false;
     }
     
     match /support/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
+      allow create: if isSignedIn();
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
     }
     
-    // --- USER DOCUMENTS ---
-    match /user/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-    
-    // --- BUSINESS PROFILES (with hierarchy) ---
-    match /user/{parent}/business_profile/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-
-    match /{path=**}/business_profile/{document} {
-      allow read: if true;
-    }
-
-
-    
-    // Global business profile access (if needed for search)
-    
-    // --- SUBSCRIPTIONS ---
-    match /user/{parent}/subscription/{document} {
-      allow create: if request.auth.uid == parent;
-      allow read: if request.auth.uid == parent;
-      allow write: if request.auth.uid == parent;
-      allow delete: if request.auth.uid == parent;
-    }
-    
-    // --- FINANCIAL DATA (STRICT RULES) ---
-    match /transaction_history/{document} {
-       allow create: if true; // Allow user creation during signup
-      allow read: if true; // Users can read only their own data
-      allow update: if true; // Limited field updates
-      allow delete: if true; // Only admin can delete users
-    }
-    
-    match /pending_transaction/{document} {
-       allow create: if true; // Allow user creation during signup
-      allow read: if true; // Users can read only their own data
-      allow update: if true; // Limited field updates
-      allow delete: if true; // Only admin can delete users
-    }
-    
+    // --- PAYOUTS LEGACY COLLECTION ---
     match /Payouts/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-    
-    // --- PARTNERS (CAs) ---
-    match /Partners/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-    
-    // --- CLIENTS ---
-    match /Clients/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-    
-    // --- CATCH-ALL DENY ---
-    match /{document=**} {
-      allow read, write: if true;
+      allow read: if isSuperAdmin() || isOwner(resource.data.partnerId);
+      allow write: if false; // Use Withdrawals collection instead
     }
   }
 }

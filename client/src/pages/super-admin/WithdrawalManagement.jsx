@@ -1,40 +1,11 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { collection, query, orderBy, onSnapshot, doc, getDoc } from "firebase/firestore";
+import { collection, query, orderBy, onSnapshot, doc, getDoc, getDocs } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../services/firebase";
 import toast, { Toaster } from "react-hot-toast";
 import { 
-  Loader2, X, Search,
-  Building2, User
-} from "lucide-react";
-
-// --- CUSTOM ICONS ---
-export const RevenueIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M12 16.5V7.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M9 9.5L12 7.5L15 9.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M9 12H15" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>
-);
-
-export const CommissionIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M8.5 10C9.32843 10 10 9.32843 10 8.5C10 7.67157 9.32843 7 8.5 7C7.67157 7 7 7.67157 7 8.5C7 9.32843 7.67157 10 8.5 10Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M15.5 17C16.3284 17 17 16.3284 17 15.5C17 14.6716 16.3284 14 15.5 14C14.6716 14 14 14.6716 14 15.5C14 16.3284 14.6716 17 15.5 17Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M16 8L8 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>
-);
-
-export const WithdrawalIcon = () => (
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M18.04 13.55C17.62 13.96 17.38 14.55 17.44 15.18C17.53 16.26 18.52 17.05 19.6 17.05H21.5V18.24C21.5 20.31 19.81 22 17.74 22H6.26C4.19 22 2.5 20.31 2.5 18.24V11.51C2.5 9.44 4.19 7.75 6.26 7.75H17.74C19.81 7.75 21.5 9.44 21.5 11.51V12.95H19.48C18.92 12.95 18.41 13.17 18.04 13.55Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M2.5 12.41V7.84C2.5 6.65 3.23 5.59 4.34 5.17L12.28 2.17C13.52 1.7 14.85 2.62 14.85 3.95V7.75" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M22.56 13.97V16.03C22.56 16.58 22.12 17.03 21.56 17.05H19.6C18.52 17.05 17.53 16.26 17.44 15.18C17.38 14.55 17.62 13.96 18.04 13.55C18.41 13.17 18.92 12.95 19.48 12.95H21.56C22.12 12.97 22.56 13.42 22.56 13.97Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M7 12H14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>
-);
+  Loader2, X, Search, Clock, Wallet, ShieldAlert
+} from "../../components/Icons";
 
 // --- REJECTION REASON MODAL ---
 const RejectReasonModal = ({ onConfirm, onCancel, processing }) => {
@@ -101,7 +72,7 @@ const WithdrawalModal = ({ payout, onClose, onAction }) => {
       }
     };
     fetchPartner();
-  }, [payout]);
+  }, [payout.partner_id]);
 
   const handleAction = async (decision) => {
     setProcessing(true);
@@ -257,10 +228,31 @@ const WithdrawalModal = ({ payout, onClose, onAction }) => {
 // --- MAIN PAGE ---
 export default function WithdrawalManagement() {
   const [payouts, setPayouts] = useState([]);
+  const [partners, setPartners] = useState({});
   const [loading, setLoading] = useState(true);
   const [selectedPayout, setSelectedPayout] = useState(null);
+  const [roleFilter, setRoleFilter] = useState('all'); // 'all', 'agent', 'cpa'
 
   useEffect(() => {
+    const fetchPartners = async () => {
+      try {
+        const partnersSnap = await getDocs(collection(db, "Partners"));
+        const partnersMap = {};
+        partnersSnap.forEach(doc => {
+          const data = doc.data();
+          partnersMap[doc.id] = {
+            name: data.displayName || data.name || "Unknown",
+            role: data.role || 'cpa'
+          };
+        });
+        setPartners(partnersMap);
+      } catch (err) {
+        console.error("Error fetching partners:", err);
+      }
+    };
+
+    fetchPartners();
+
     // Real-time listener for Payouts
     const q = query(collection(db, "Payouts"), orderBy("requestedAt", "desc"));
     const unsub = onSnapshot(q, (snapshot) => {
@@ -273,23 +265,37 @@ export default function WithdrawalManagement() {
     return () => unsub();
   }, []);
 
+  // Filter payouts by role
+  const filteredPayouts = useMemo(() => {
+    if (roleFilter === 'all') return payouts;
+    return payouts.filter(p => {
+      // Use partnerRole from payout if available, otherwise lookup from partners map
+      const partnerRole = p.partnerRole || partners[p.partner_id]?.role || 'ca';
+      return roleFilter === partnerRole;
+    });
+  }, [payouts, roleFilter, partners]);
+
   const stats = useMemo(() => {
     return {
-        pending: payouts.filter(p => p.status === 'pending').reduce((acc, p) => acc + p.amount, 0),
-        paid: payouts.filter(p => p.status === 'paid').reduce((acc, p) => acc + p.amount, 0),
-        rejected: payouts.filter(p => p.status === 'rejected').reduce((acc, p) => acc + p.amount, 0),
+        pending: filteredPayouts.filter(p => p.status === 'pending').reduce((acc, p) => acc + p.amount, 0),
+        paid: filteredPayouts.filter(p => p.status === 'paid').reduce((acc, p) => acc + p.amount, 0),
+        rejected: filteredPayouts.filter(p => p.status === 'rejected').reduce((acc, p) => acc + p.amount, 0),
     };
-  }, [payouts]);
+  }, [filteredPayouts]);
 
   const sortedPayouts = useMemo(() => {
-    return [...payouts].sort((a, b) => {
+    return [...filteredPayouts].map(p => ({
+      ...p,
+      partnerName: p.partnerName || partners[p.partner_id]?.name || "Unknown",
+      partnerRole: p.partnerRole || partners[p.partner_id]?.role || "ca"
+    })).sort((a, b) => {
         const priority = { pending: 0, approved: 1, paid: 2, rejected: 3 };
         const scoreA = priority[a.status] ?? 99;
         const scoreB = priority[b.status] ?? 99;
         if (scoreA !== scoreB) return scoreA - scoreB;
         return b.requestedAt - a.requestedAt;
     });
-  }, [payouts]);
+  }, [filteredPayouts, partners]);
 
   const handlePayoutAction = async (id, decision, amount, rejectionReason = null) => {
     const loadingToast = toast.loading(
@@ -347,10 +353,10 @@ export default function WithdrawalManagement() {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
-  if (loading) return <div className="h-[60vh] flex items-center justify-center"><Loader2 className="animate-spin text-slate-400" size={32}/></div>;
+  if (loading) return <div className="h-[60vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#4D7CFE]" size={32}/></div>;
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 font-sans text-slate-900 pb-20">
+    <div className="space-y-8 animate-in fade-in duration-500 font-sans text-[#111111] pb-20">
       <Toaster 
         position="top-right" 
         toastOptions={{ duration: 4000, style: { borderRadius: '12px', padding: '16px', boxShadow: '0 10px 40px rgba(0,0,0,0.12)' } }}
@@ -358,66 +364,110 @@ export default function WithdrawalManagement() {
 
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
         <div>
-            <h1 className="text-2xl font-bold text-slate-900">Withdrawals</h1>
-            <p className="text-sm text-slate-500 mt-1">Review, approve, and track CPA withdrawal requests</p>
+            <h1 className="text-2xl font-bold text-[#111111]">Withdrawals</h1>
+            <p className="text-sm text-[#9499A1] mt-1">Review, approve, and track Agent & CPA withdrawal requests</p>
         </div>
+      </div>
+
+      {/* Tabs for filtering by role */}
+      <div className="flex gap-2 border-b border-[#E3E6EA]">
+        <button
+          onClick={() => setRoleFilter('all')}
+          className={`px-6 py-3 text-sm font-semibold transition-colors ${
+            roleFilter === 'all'
+              ? 'border-b-2 border-[#4D7CFE] text-[#4D7CFE]'
+              : 'text-[#9499A1] hover:text-[#111111]'
+          }`}
+        >
+          All Withdrawals
+        </button>
+        <button
+          onClick={() => setRoleFilter('agent')}
+          className={`px-6 py-3 text-sm font-semibold transition-colors ${
+            roleFilter === 'agent'
+              ? 'border-b-2 border-[#4D7CFE] text-[#4D7CFE]'
+              : 'text-[#9499A1] hover:text-[#111111]'
+          }`}
+        >
+          Agent Withdrawals
+        </button>
+        <button
+          onClick={() => setRoleFilter('cpa')}
+          className={`px-6 py-3 text-sm font-semibold transition-colors ${
+            roleFilter === 'cpa'
+              ? 'border-b-2 border-[#4D7CFE] text-[#4D7CFE]'
+              : 'text-[#9499A1] hover:text-[#111111]'
+          }`}
+        >
+          CPA Withdrawals
+        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-6 rounded-2xl border border-[#E3E6EA] shadow-sm">
             <div className="flex justify-between items-start mb-4">
-                <p className="text-sm text-slate-400 font-medium">Pending Amount</p>
-                <div className="p-2.5 rounded-full bg-[rgba(77,124,254,0.1)]"><RevenueIcon /></div>
+                <p className="text-sm text-[#9499A1] font-medium">Pending Amount</p>
+                <div className="p-2.5 rounded-full bg-[#4D7CFE1A]"><Clock size={24} /></div>
             </div>
-            <h3 className="text-3xl font-bold text-slate-900">${stats.pending.toLocaleString()}</h3>
-            <p className="text-[10px] text-slate-400 mt-2">Total value of withdrawals awaiting action</p>
+            <h3 className="text-3xl font-bold text-[#111111]">${stats.pending.toLocaleString()}</h3>
+            <p className="text-[10px] text-[#9499A1] mt-2">Total value of withdrawals awaiting action</p>
         </div>
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-6 rounded-2xl border border-[#E3E6EA] shadow-sm">
             <div className="flex justify-between items-start mb-4">
-                <p className="text-sm text-slate-400 font-medium">Paid Amount</p>
-                <div className="p-2.5 rounded-full bg-[rgba(77,124,254,0.1)]"><WithdrawalIcon /></div>
+                <p className="text-sm text-[#9499A1] font-medium">Paid Amount</p>
+                <div className="p-2.5 rounded-full bg-[#4D7CFE1A]"><Wallet size={24} /></div>
             </div>
-            <h3 className="text-3xl font-bold text-slate-900">${stats.paid.toLocaleString()}</h3>
-            <p className="text-[10px] text-slate-400 mt-2">Total withdrawals completed in selected period</p>
+            <h3 className="text-3xl font-bold text-[#111111]">${stats.paid.toLocaleString()}</h3>
+            <p className="text-[10px] text-[#9499A1] mt-2">Total withdrawals completed in selected period</p>
         </div>
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-6 rounded-2xl border border-[#E3E6EA] shadow-sm">
             <div className="flex justify-between items-start mb-4">
-                <p className="text-sm text-slate-400 font-medium">Rejected Amount</p>
-                <div className="p-2.5 rounded-full bg-[rgba(77,124,254,0.1)]"><CommissionIcon /></div>
+                <p className="text-sm text-[#9499A1] font-medium">Rejected Amount</p>
+                <div className="p-2.5 rounded-full bg-[#4D7CFE1A]"><ShieldAlert size={24} /></div>
             </div>
-            <h3 className="text-3xl font-bold text-slate-900">${stats.rejected.toLocaleString()}</h3>
-            <p className="text-[10px] text-slate-400 mt-2">Total value of rejected withdrawals</p>
+            <h3 className="text-3xl font-bold text-[#111111]">${stats.rejected.toLocaleString()}</h3>
+            <p className="text-[10px] text-[#9499A1] mt-2">Total value of rejected withdrawals</p>
         </div>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+      <div className="bg-white border border-[#E3E6EA] rounded-xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-white border-b border-slate-100">
               <tr>
-                <th className="py-5 px-6 text-[11px] font-medium text-slate-400 uppercase tracking-wide">Date</th>
-                <th className="py-5 px-6 text-[11px] font-medium text-slate-400 uppercase tracking-wide">CPA Name</th>
-                <th className="py-5 px-6 text-[11px] font-medium text-slate-400 uppercase tracking-wide">Amount</th>
-                <th className="py-5 px-6 text-[11px] font-medium text-slate-400 uppercase tracking-wide">Bank Account</th>
-                <th className="py-5 px-6 text-[11px] font-medium text-slate-400 uppercase tracking-wide text-center">Status</th>
-                <th className="py-5 px-6 text-[11px] font-medium text-slate-400 uppercase tracking-wide text-right">Actions</th>
+                <th className="py-5 px-6 text-[11px] font-medium text-[#9499A1] uppercase tracking-wide">Date</th>
+                <th className="py-5 px-6 text-[11px] font-medium text-[#9499A1] uppercase tracking-wide">Partner Name</th>
+                <th className="py-5 px-6 text-[11px] font-medium text-[#9499A1] uppercase tracking-wide">Role</th>
+                <th className="py-5 px-6 text-[11px] font-medium text-[#9499A1] uppercase tracking-wide">Amount</th>
+                <th className="py-5 px-6 text-[11px] font-medium text-[#9499A1] uppercase tracking-wide">Bank Account</th>
+                <th className="py-5 px-6 text-[11px] font-medium text-[#9499A1] uppercase tracking-wide text-center">Status</th>
+                <th className="py-5 px-6 text-[11px] font-medium text-[#9499A1] uppercase tracking-wide text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {sortedPayouts.map((p) => (
                 <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
-                  <td className="py-5 px-6 text-sm font-medium text-slate-600">{formatDate(p.requestedAt)}</td>
-                  <td className="py-5 px-6 text-sm font-medium text-slate-900">{p.partnerName}</td>
-                  <td className="py-5 px-6 text-sm font-bold text-slate-900">${p.amount.toLocaleString()}</td>
-                  <td className="py-5 px-6 text-sm text-slate-600 flex items-center gap-1">
+                  <td className="py-5 px-6 text-sm font-medium text-[#9499A1]">{formatDate(p.requestedAt)}</td>
+                  <td className="py-5 px-6 text-sm font-medium text-[#111111]">{p.partnerName}</td>
+                  <td className="py-5 px-6">
+                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-bold ${
+                      p.partnerRole === 'agent' 
+                        ? 'bg-[#4D7CFE1A] text-[#4D7CFE]' 
+                        : 'bg-[#00C8531A] text-[#00C853]'
+                    }`}>
+                      {p.partnerRole === 'agent' ? 'Agent' : 'CPA'}
+                    </span>
+                  </td>
+                  <td className="py-5 px-6 text-sm font-bold text-[#111111]">${p.amount.toLocaleString()}</td>
+                  <td className="py-5 px-6 text-sm text-[#9499A1] flex items-center gap-1">
                       <span className="font-medium">{p.bankSnapshot?.companyName || "Bank Account"}</span>
-                      <span className="text-slate-400 text-xs">•••• {p.bankSnapshot?.accountNumber?.slice(-4) || "0000"}</span>
+                      <span className="text-[#9499A1] text-xs">•••• {p.bankSnapshot?.accountNumber?.slice(-4) || "0000"}</span>
                   </td>
                   <td className="py-5 px-6 text-center">{getStatusBadge(p.status)}</td>
                   <td className="py-5 px-6 text-right">
                       <button 
                         onClick={() => setSelectedPayout(p)} 
-                        className="px-4 py-1.5 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all shadow-sm cursor-pointer"
+                        className="px-4 py-1.5 border border-[#E3E6EA] rounded-lg text-xs font-bold text-[#9499A1] hover:bg-[#4D7CFE] hover:text-white hover:border-[#4D7CFE] transition-all shadow-sm cursor-pointer"
                       >
                         View Details
                       </button>
@@ -426,12 +476,20 @@ export default function WithdrawalManagement() {
               ))}
               {sortedPayouts.length === 0 && (
                  <tr>
-                    <td colSpan="6" className="py-24 text-center">
+                    <td colSpan="7" className="py-24 text-center">
                         <div className="flex flex-col items-center">
-                            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 text-slate-300">
+                            <div className="w-16 h-16 bg-[#4D7CFE1A] rounded-full flex items-center justify-center mb-4 text-[#4D7CFE]">
                                 <Search size={24}/>
                             </div>
-                            <p className="text-slate-900 font-bold">No withdrawal requests</p>
+                            <h3 className="text-[#111111] font-bold text-lg">No Withdrawals Found</h3>
+                            <p className="text-[#9499A1] text-sm mt-1">
+                                {roleFilter === 'all' 
+                                  ? 'No withdrawal requests yet' 
+                                  : roleFilter === 'agent'
+                                    ? 'No Agent withdrawal requests'
+                                    : 'No CPA withdrawal requests'
+                                }
+                            </p>
                         </div>
                     </td>
                  </tr>

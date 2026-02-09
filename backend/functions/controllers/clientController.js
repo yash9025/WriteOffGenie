@@ -98,6 +98,7 @@ export const registerClient = async (data, context) => {
                     await db.collection("Partners").doc(agentId).update({
                         "stats.totalEarnings": FieldValue.increment(agentCommission),
                         "stats.totalRevenue": FieldValue.increment(PLAN_AMOUNT),
+                        "stats.totalSubscribed": FieldValue.increment(1),
                         "walletBalance": FieldValue.increment(agentCommission)
                     });
 

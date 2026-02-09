@@ -1,4 +1,4 @@
-import { User, Calendar, ShieldCheck, Clock } from "lucide-react";
+import { User, Calendar, ShieldCheck, Clock } from "./Icons";
 
 export function ReferralsList({ referrals }) {
   // 🛡️ Safety check: Ensure referrals is an array

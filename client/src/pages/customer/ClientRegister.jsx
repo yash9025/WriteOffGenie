@@ -5,6 +5,7 @@ import {
   User, Mail, Lock, Phone, Ticket, Loader2, ArrowRight, CheckCircle, CreditCard 
 } from "lucide-react";
 import { functions } from "../../services/firebase"; // Ensure this matches your project path
+import toast, { Toaster } from "react-hot-toast";
 import InputGroup from "../../components/InputGroup"; // Ensure this component exists
 
 function ClientRegister() {
@@ -169,6 +170,7 @@ function ClientRegister() {
         </div>
 
       </div>
+      <Toaster position="top-right" />
     </div>
   );
 }

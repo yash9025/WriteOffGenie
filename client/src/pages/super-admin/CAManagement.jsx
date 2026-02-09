@@ -1,15 +1,17 @@
-import React, { useEffect, useState } from "react";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
+import React, { useEffect, useState, useMemo } from "react";
+import { collection, query, where, onSnapshot, doc, getDoc, getDocs } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { useNavigate } from "react-router-dom";
 import { db } from "../../services/firebase";
 import toast, { Toaster } from "react-hot-toast";
 import { 
-  Search, Loader2, Ban, CheckCircle2, UserPlus, X 
+  Search, Loader2, Ban, CheckCircle2, UserPlus, X, DollarSign, TrendingUp, Wallet 
 } from "lucide-react";
+import StatCard from "../../components/common/StatCard";
 
 export default function CAManagement() {
-  const [cas, setCas] = useState([]);
+  const [cpas, setCPAs] = useState([]);
+  const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(null);
   const [filter, setFilter] = useState("");
@@ -26,11 +28,51 @@ export default function CAManagement() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const q = query(collection(db, "Partners"), where("role", "==", "ca"));
-    const unsub = onSnapshot(q, (s) => {
-      setCas(s.docs.map(d => ({ id: d.id, ...d.data() })));
+    const q = query(collection(db, "Partners"), where("role", "==", "cpa"));
+    const unsub = onSnapshot(q, async (snapshot) => {
+      const cpaData = [];
+      for (const docSnap of snapshot.docs) {
+        const data = { id: docSnap.id, ...docSnap.data() };
+        
+        // Fetch referrer name if exists
+        if (data.referredBy) {
+          try {
+            const referrerDoc = await getDoc(doc(db, "Partners", data.referredBy));
+            if (referrerDoc.exists()) {
+              const referrerData = referrerDoc.data();
+              data.referrerName = referrerData.displayName || referrerData.name || "Unknown";
+              data.referrerRole = referrerData.role;
+            } else {
+              data.referrerName = "Direct";
+              data.referrerRole = null;
+            }
+          } catch (err) {
+            console.error("Error fetching referrer:", err);
+            data.referrerName = "Direct";
+            data.referrerRole = null;
+          }
+        } else {
+          data.referrerName = "Direct";
+          data.referrerRole = null;
+        }
+        
+        cpaData.push(data);
+      }
+      setCPAs(cpaData);
       setLoading(false);
     });
+
+    // Fetch all clients to calculate stats
+    const fetchClients = async () => {
+      try {
+        const clientsSnap = await getDocs(collection(db, "Clients"));
+        setClients(clientsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (err) {
+        console.error("Error fetching clients:", err);
+      }
+    };
+    fetchClients();
+
     return () => unsub();
   }, []);
 
@@ -79,12 +121,36 @@ export default function CAManagement() {
   };
 
   const goToPartnerDetail = (partnerId) => {
-    navigate(`/admin/cas/${partnerId}`);
+    navigate(`/admin/cpas/${partnerId}`);
   };
 
-  const filtered = cas.filter(ca => 
-    ca.name?.toLowerCase().includes(filter) || 
-    ca.email?.toLowerCase().includes(filter)
+  // Calculate stats from all CPAs
+  const stats = useMemo(() => {
+    let totalRevenue = 0;
+    let totalCommission = 0;
+
+    clients.forEach(client => {
+      const amount = client.subscription?.amountPaid || 0;
+      const cpa = cpas.find(c => c.id === client.referredBy);
+      
+      if (cpa) {
+        totalRevenue += amount;
+        const commissionRate = (cpa.commissionRate || 10) / 100;
+        totalCommission += amount * commissionRate;
+      }
+    });
+
+    const netRevenue = totalRevenue - totalCommission;
+
+    return { totalRevenue, totalCommission, netRevenue };
+  }, [clients, cpas]);
+
+  const formatCurrency = (value) => `$${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+
+  const filtered = cpas.filter(cpa => 
+    cpa.displayName?.toLowerCase().includes(filter) || 
+    cpa.email?.toLowerCase().includes(filter) ||
+    cpa.referrerName?.toLowerCase().includes(filter)
   );
 
   const formatDate = (timestamp) => {
@@ -105,16 +171,38 @@ export default function CAManagement() {
       {/* --- HEADER --- */}
       <div className="flex items-center justify-between">
          <div>
-           <h1 className="text-2xl font-semibold leading-9 text-slate-900">CPA Management</h1>
-           <p className="text-base font-normal leading-6 text-slate-400">View, manage, and control Chartered Public Accountant accounts</p>
+           <h1 className="text-2xl font-semibold leading-9 text-[#111111]">CPA Management</h1>
+           <p className="text-base font-normal leading-6 text-[#9499A1]">View and manage all CPAs platform-wide</p>
          </div>
          <button
            onClick={() => setShowInviteModal(true)}
-           className="flex items-center gap-2 px-5 py-2.5 bg-[#011C39] text-white rounded-lg text-sm font-semibold hover:bg-[#022a55] transition-colors cursor-pointer"
+           className="flex items-center gap-2 px-5 py-2.5 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-colors cursor-pointer"
          >
            <UserPlus size={18} />
            Invite CPA
          </button>
+      </div>
+
+      {/* --- STATS CARDS --- */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <StatCard 
+          title="Total Revenue from CPAs" 
+          value={formatCurrency(stats.totalRevenue)} 
+          description="Revenue generated from all CPAs" 
+          icon={DollarSign} 
+        />
+        <StatCard 
+          title="Total Commissions" 
+          value={formatCurrency(stats.totalCommission)} 
+          description="Total commission paid to CPAs" 
+          icon={TrendingUp} 
+        />
+        <StatCard 
+          title="Net Revenue" 
+          value={formatCurrency(stats.netRevenue)} 
+          description="After CPA commissions" 
+          icon={Wallet} 
+        />
       </div>
 
       {/* --- INVITE MODAL --- */}
@@ -139,7 +227,7 @@ export default function CAManagement() {
                   value={inviteForm.name}
                   onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })}
                   placeholder="Enter partner's full name"
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#011C39] transition-colors"
+                  className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-lg text-sm focus:outline-none focus:border-[#4D7CFE] transition-colors"
                   required
                 />
               </div>
@@ -151,7 +239,7 @@ export default function CAManagement() {
                   value={inviteForm.email}
                   onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
                   placeholder="Enter partner's email"
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#011C39] transition-colors"
+                  className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-lg text-sm focus:outline-none focus:border-[#4D7CFE] transition-colors"
                   required
                 />
               </div>
@@ -160,12 +248,12 @@ export default function CAManagement() {
                 <label className="block text-sm font-medium text-slate-700 mb-1">Commission Rate (%)</label>
                 <input
                   type="number"
-                  min="1"
-                  max="100"
+                  min="10"
+                  max="50"
                   value={inviteForm.commissionRate}
                   onChange={(e) => setInviteForm({ ...inviteForm, commissionRate: parseInt(e.target.value) || 10 })}
                   placeholder="10"
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#011C39] transition-colors"
+                  className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-lg text-sm focus:outline-none focus:border-[#4D7CFE] transition-colors"
                   required
                 />
                 <p className="mt-1 text-xs text-slate-400">Partner will earn this percentage on each referred subscription</p>
@@ -182,7 +270,7 @@ export default function CAManagement() {
                 <button
                   type="submit"
                   disabled={sendingInvite}
-                  className="flex-1 px-4 py-2.5 bg-[#011C39] text-white rounded-lg text-sm font-semibold hover:bg-[#022a55] transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
+                  className="flex-1 px-4 py-2.5 bg-[#4D7CFE] text-white rounded-lg text-sm font-semibold hover:bg-[#3D6CED] transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {sendingInvite ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
                   {sendingInvite ? "Sending..." : "Send Invite"}
@@ -200,44 +288,52 @@ export default function CAManagement() {
           <table className="w-full text-left border-collapse">
             <thead className="bg-white border-b border-slate-100">
               <tr>
-                <th className="py-5 px-6 text-xs font-medium text-slate-400">CA Name</th>
-                <th className="py-5 px-6 text-xs font-medium text-slate-400">Email</th>
-                <th className="py-5 px-6 text-xs font-medium text-slate-400">Joined On</th>
-                <th className="py-5 px-6 text-xs font-medium text-slate-400">Referred Users</th>
-                <th className="py-5 px-6 text-xs font-medium text-slate-400">Total Earnings</th>
-                <th className="py-5 px-6 text-xs font-medium text-slate-400 text-center">Status</th>
-                <th className="py-5 px-6 text-xs font-medium text-slate-400 text-right">Actions</th>
+                <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">CPA Name</th>
+                <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Email</th>
+                <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Referred By</th>
+                <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Joined On</th>
+                <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Referred Users</th>
+                <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Total Earnings</th>
+                <th className="py-5 px-6 text-xs font-medium text-[#9499A1] text-center">Status</th>
+                <th className="py-5 px-6 text-xs font-medium text-[#9499A1] text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {filtered.map((ca) => {
-                 const isActive = ca.status === 'active';
+              {filtered.map((cpa) => {
+                 const isActive = cpa.status === 'active';
                  return (
-                   <tr key={ca.id} className="hover:bg-slate-50/50 transition-colors group">
+                   <tr key={cpa.id} className="hover:bg-slate-50/50 transition-colors group">
                      
                      {/* Name */}
                      <td className="py-5 px-6">
-                        <span className="text-sm font-semibold text-slate-900">{ca.name}</span>
+                        <span className="text-sm font-semibold text-[#111111]">{cpa.displayName || cpa.name || "Unknown"}</span>
                      </td>
 
                      {/* Email */}
                      <td className="py-5 px-6">
-                        <span className="text-sm text-slate-500 font-medium">{ca.email}</span>
+                        <span className="text-sm text-[#9499A1] font-medium">{cpa.email}</span>
+                     </td>
+
+                     {/* Referred By */}
+                     <td className="py-5 px-6">
+                        <span className={`text-sm font-medium ${cpa.referrerRole === 'agent' ? 'text-[#4D7CFE]' : 'text-[#9499A1]'}`}>
+                          {cpa.referrerName || "Direct"}
+                        </span>
                      </td>
 
                      {/* Joined Date */}
                      <td className="py-5 px-6">
-                        <span className="text-sm text-slate-500">{formatDate(ca.createdAt)}</span>
+                        <span className="text-sm text-[#9499A1]">{formatDate(cpa.createdAt)}</span>
                      </td>
 
                      {/* Referred Users */}
                      <td className="py-5 px-6">
-                        <span className="text-sm font-medium text-slate-700 ml-2">{ca.stats?.totalReferred || 0}</span>
+                        <span className="text-sm font-medium text-[#111111] ml-2">{cpa.stats?.totalReferred || 0}</span>
                      </td>
 
                      {/* Earnings */}
                      <td className="py-5 px-6">
-                        <span className="text-sm font-bold text-slate-900">${(ca.stats?.totalEarnings || 0).toLocaleString()}</span>
+                        <span className="text-sm font-bold text-[#111111]">${(cpa.stats?.totalEarnings || 0).toLocaleString()}</span>
                      </td>
 
                      {/* Status Badge */}
@@ -255,17 +351,17 @@ export default function CAManagement() {
                      <td className="py-5 px-6 text-right">
                         <div className="flex items-center justify-end gap-3">
                            <button 
-                               onClick={() => toggleStatus(ca.id, ca.status)}
-                               disabled={processing === ca.id}
+                               onClick={() => toggleStatus(cpa.id, cpa.status)}
+                               disabled={processing === cpa.id}
                                className="p-1.5 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100 cursor-pointer"
                                title={isActive ? "Disable Account" : "Activate Account"}
                            >
-                               {processing === ca.id ? <Loader2 size={16} className="animate-spin"/> : (isActive ? <Ban size={16}/> : <CheckCircle2 size={16}/>)}
+                               {processing === cpa.id ? <Loader2 size={16} className="animate-spin"/> : (isActive ? <Ban size={16}/> : <CheckCircle2 size={16}/>)}
                            </button>
 
                            <button 
-                               onClick={() => goToPartnerDetail(ca.id)}
-                               className="px-5 py-2 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all shadow-sm cursor-pointer"
+                               onClick={() => goToPartnerDetail(cpa.id)}
+                               className="px-5 py-2 border border-[#E3E6EA] rounded-lg text-xs font-bold text-[#9499A1] hover:bg-[#4D7CFE] hover:text-white hover:border-[#4D7CFE] transition-all shadow-sm cursor-pointer"
                            >
                                View
                            </button>
@@ -280,11 +376,11 @@ export default function CAManagement() {
         
         {filtered.length === 0 && (
             <div className="flex flex-col items-center justify-center py-24 bg-white">
-                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
-                    <Search size={32} className="text-slate-300" />
+                <div className="w-20 h-20 bg-[#4D7CFE1A] rounded-full flex items-center justify-center mb-4">
+                    <Search size={32} className="text-[#4D7CFE]" />
                 </div>
-                <h3 className="text-slate-900 font-bold text-lg">No CA accounts yet</h3>
-                <p className="text-slate-500 text-sm mt-1">CA accounts will appear here once they register.</p>
+                <h3 className="text-[#111111] font-bold text-lg">No CPA accounts yet</h3>
+                <p className="text-[#9499A1] text-sm mt-1">CPA accounts will appear here once they register.</p>
             </div>
         )}
       </div>

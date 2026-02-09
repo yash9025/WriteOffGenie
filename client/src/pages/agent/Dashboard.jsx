@@ -10,7 +10,7 @@ import {
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
-import { Loader2, TrendingUp, Wallet, Users, DollarSign } from "lucide-react";
+import { Loader2, TrendingUp, Wallet, Users, DollarSign } from "../../components/Icons";
 import toast, { Toaster } from "react-hot-toast";
 import StatCard from "../../components/common/StatCard";
 import {

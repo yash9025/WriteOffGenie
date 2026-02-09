@@ -2,8 +2,9 @@ import React, { useEffect, useState, useMemo } from "react";
 import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
 import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
-import { Loader2, ChevronDown } from "lucide-react";
-import {RevenueIcon, SubscriptionIcon, CalendarIcon, EmptyPerformanceIllustration as EmptyIllustration } from "../../components/Icons";
+import { Loader2, ChevronDown } from "../../components/Icons";
+import toast, { Toaster } from "react-hot-toast";
+import {RevenueIcon, SubscriptionIcon, CalendarIconLarge, EmptyPerformanceIllustration as EmptyIllustration } from "../../components/Icons";
 
 // --- STAT CARD ---
 const StatCard = ({ icon: Icon, label, value, description }) => (
@@ -60,7 +61,8 @@ export default function Performance() {
       unsubProfile();
       unsubClients();
     };
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
 
   // Calculate commission dynamically based on partner's rate
   const clientsWithCommission = useMemo(() => {
@@ -164,7 +166,7 @@ export default function Performance() {
           description="Total commission earned from all referrals"
         />
         <StatCard 
-          icon={CalendarIcon} 
+          icon={CalendarIconLarge} 
           label="Period Earnings" 
           value={`$${thisMonthEarnings.toFixed(2)}`}
           description="Commission earned in the selected period"
@@ -253,6 +255,7 @@ export default function Performance() {
           </div>
         </div>
       )}
+      <Toaster position="top-right" />
     </div>
   );
 }

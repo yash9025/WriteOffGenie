@@ -53,7 +53,7 @@ export const processWithdrawal = async (data, context) => {
     const { payoutId, decision, rejectionReason } = data;
 
     // 2. Validate Input
-    if (!payoutId || !['approve', 'reject'].includes(decision)) {
+    if (!payoutId || !['approve', 'reject', 'mark_paid'].includes(decision)) {
         throw new https.HttpsError('invalid-argument', 'Invalid parameters.');
     }
 
@@ -67,25 +67,44 @@ export const processWithdrawal = async (data, context) => {
             }
 
             const payoutData = payoutDoc.data();
-            if (payoutData.status !== 'pending') {
-                throw new https.HttpsError('failed-precondition', 'Payout already processed.');
-            }
-
             const partnerRef = db.collection("Partners").doc(payoutData.partner_id);
 
             if (decision === 'approve') {
-                // Approve: Update stats (money actually leaves system)
+                // Validate status
+                if (payoutData.status !== 'pending') {
+                    throw new https.HttpsError('failed-precondition', 'Only pending payouts can be approved.');
+                }
+
+                // Approve: Just change status to 'approved' (no money movement yet)
+                t.update(payoutRef, {
+                    status: 'approved',
+                    approvedAt: FieldValue.serverTimestamp(),
+                    approvedBy: context.auth.uid
+                });
+
+            } else if (decision === 'mark_paid') {
+                // Validate status
+                if (payoutData.status !== 'approved') {
+                    throw new https.HttpsError('failed-precondition', 'Only approved payouts can be marked as paid.');
+                }
+
+                // Mark as Paid: Update stats (money actually leaves system)
                 t.update(partnerRef, {
                     "stats.totalWithdrawn": FieldValue.increment(payoutData.amount)
                 });
 
                 t.update(payoutRef, {
                     status: 'paid',
-                    processedAt: FieldValue.serverTimestamp(),
-                    processedBy: context.auth.uid
+                    paidAt: FieldValue.serverTimestamp(),
+                    paidBy: context.auth.uid
                 });
 
-            } else {
+            } else if (decision === 'reject') {
+                // Validate status
+                if (payoutData.status !== 'pending') {
+                    throw new https.HttpsError('failed-precondition', 'Only pending payouts can be rejected.');
+                }
+
                 // Reject: Refund amount back to wallet
                 t.update(partnerRef, {
                     walletBalance: FieldValue.increment(payoutData.amount)
@@ -94,8 +113,8 @@ export const processWithdrawal = async (data, context) => {
                 t.update(payoutRef, {
                     status: 'rejected',
                     rejectionReason: rejectionReason || "Admin rejected request",
-                    processedAt: FieldValue.serverTimestamp(),
-                    processedBy: context.auth.uid
+                    rejectedAt: FieldValue.serverTimestamp(),
+                    rejectedBy: context.auth.uid
                 });
             }
         });

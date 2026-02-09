@@ -4,7 +4,7 @@ import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 
 import { db, auth } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
 import toast, { Toaster } from "react-hot-toast";
-import { Loader2, X, Plus, Trash2, Star, Edit2, Camera } from "lucide-react";
+import { Loader2, X, Plus, Trash2, Star, Edit2, Camera } from "../../components/Icons";
 
 // Simple Camera Icon Button
 const CameraIcon = () => (
@@ -65,7 +65,8 @@ export default function MyProfile() {
       unsubProfile();
       unsubBanks();
     };
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
 
   // --- 2. HANDLERS ---
 

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { signOut } from "firebase/auth";
-import { Menu, X, LogOut, Sparkles } from "lucide-react";
+import { Menu, X, LogOut, Sparkles } from "./Icons";
 import { auth } from "../services/firebase";
 
 function Navbar({ user, role }) {

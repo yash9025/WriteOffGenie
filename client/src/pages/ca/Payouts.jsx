@@ -5,8 +5,8 @@ import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
 import { useSearch } from "../../context/SearchContext";
 import toast, { Toaster } from "react-hot-toast"; 
-import { Loader2, ChevronDown, X } from "lucide-react";
-import { RevenueIcon, PendingIcon, WalletIcon, TotalPaidIcon, EmptyPayoutIllustration as EmptyIllustration } from "../../components/Icons";
+import { Loader2, ChevronDown, X } from "../../components/Icons";
+import { RevenueIcon, PendingIcon, WalletIconLarge, TotalPaidIcon, EmptyPayoutIllustration as EmptyIllustration } from "../../components/Icons";
 
 // --- STAT CARD ---
 const StatCard = ({ icon, label, value, description }) => (
@@ -71,7 +71,8 @@ export default function Payouts() {
     });
 
     return () => { unsubProfile(); unsubHistory(); unsubBanks(); };
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
 
   const selectedBank = useMemo(() => 
     bankAccounts.find(a => a.id === selectedBankId) || null
@@ -304,7 +305,7 @@ export default function Payouts() {
               <div className="flex items-center justify-between">
                 <span className="text-[#64748B] text-sm font-medium">Available Balance</span>
                 <div className="bg-[#00D1A0]/10 p-2 rounded-full text-[#00D1A0]">
-                  <WalletIcon size={20}/>
+                  <WalletIconLarge size={20}/>
                 </div>
               </div>
               <p className="text-[#111111] text-3xl font-bold">

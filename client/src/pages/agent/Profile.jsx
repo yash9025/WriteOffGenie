@@ -3,7 +3,7 @@ import { doc, updateDoc, collection, addDoc, deleteDoc, query, orderBy, onSnapsh
 import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
 import { db, auth } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
-import { Camera, Loader2, Save, Plus, Trash2, Star, Edit2, X } from "lucide-react";
+import { Camera, Loader2, Save, Plus, Trash2, Star, Edit2, X } from "../../components/Icons";
 import toast, { Toaster } from "react-hot-toast";
 
 // --- REUSABLE UI COMPONENTS (Matches Reference) ---

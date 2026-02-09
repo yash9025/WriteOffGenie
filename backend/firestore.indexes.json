@@ -1,0 +1,29 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "Payouts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "partner_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "requestedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "BankAccounts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

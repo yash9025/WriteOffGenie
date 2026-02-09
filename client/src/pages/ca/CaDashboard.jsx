@@ -1,13 +1,13 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { doc, onSnapshot, collection, query, where, getDocs } from "firebase/firestore";
 import { Link } from "react-router-dom";
-import { Copy, Check, Loader2, Link as LinkIcon, Mail } from "lucide-react";
+import { Copy, Check, Loader2, Link as LinkIcon, Mail } from "../../components/Icons";
 import toast, { Toaster } from "react-hot-toast";
 import { db } from "../../services/firebase";
 import { getFunctions, httpsCallable } from "firebase/functions"; 
 import { useAuth } from "../../context/AuthContext";
 import { useSearch } from "../../context/SearchContext";
-import { RevenueIcon, WithdrawalIcon, SubscriptionIcon, UsersIcon } from "../../components/Icons";
+import { RevenueIcon, WithdrawalIcon, SubscriptionIcon, UsersIconLarge } from "../../components/Icons";
 
 // --- STAT CARD ---
 const StatCard = ({ title, value, description, icon: Icon, isLoading }) => (
@@ -69,7 +69,8 @@ function Dashboard() {
 
     fetchReferrals();
     return () => unsubProfile();
-  }, [user, authLoading]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, authLoading]);
 
   // Derived Values
   const totalReferred = profile?.stats?.totalReferred || 0;
@@ -171,7 +172,7 @@ function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard title="Total Earnings" value={`$${(profile?.stats?.totalEarnings || 0).toLocaleString()}`} description="Amount earned from subscriptions" icon={RevenueIcon} isLoading={dataLoading} />
         <StatCard title="Available Balance" value={`$${(profile?.walletBalance || 0).toLocaleString()}`} description="Funds available for withdrawal" icon={WithdrawalIcon} isLoading={dataLoading} />
-        <StatCard title="Users Referred" value={totalReferred} description="Total signups via your link" icon={UsersIcon} isLoading={dataLoading} />
+        <StatCard title="Users Referred" value={totalReferred} description="Total signups via your link" icon={UsersIconLarge} isLoading={dataLoading} />
         <StatCard title="Active Subscriptions" value={totalSubscribed} description="Users with active paid plans" icon={SubscriptionIcon} isLoading={dataLoading} />
       </div>
 
@@ -299,7 +300,7 @@ function Dashboard() {
           ) : (
             <div className="py-12 text-center">
               <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3">
-                <UsersIcon /> 
+                <UsersIconLarge /> 
               </div>
               <p className="text-[#111111] text-sm font-medium">No referrals found</p>
               <p className="text-[#9499A1] text-xs mt-1">

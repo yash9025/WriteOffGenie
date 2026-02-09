@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { useNavigate, Link } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { Loader2 } from "../../components/Icons";
 import { auth } from "../../services/firebase";
 import toast, { Toaster } from "react-hot-toast";
 import LoginImage from "../../assets/LoginImage.webp";

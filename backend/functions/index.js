@@ -21,7 +21,8 @@ import {
 // 2. Export Pre-configured Triggers Directly
 // We export this directly because it is ALREADY defined as an onCall function in the controller
 export { sendReferralInvite } from "./controllers/emailController.js";
-export { sendCPAInvite, verifyInvite } from "./controllers/inviteController.js";
+export { sendCPAInvite, sendAgentInvite, verifyInvite } from "./controllers/inviteController.js";
+export { getAgentStats, getAgentCPAs, processAgentCommission, registerAgent } from "./controllers/agentController.js";
 
 // Set Max Instances
 setGlobalOptions({ maxInstances: 10 });

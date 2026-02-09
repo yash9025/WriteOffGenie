@@ -3,7 +3,7 @@ import { collection, query, where, getDocs, orderBy } from "firebase/firestore";
 import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
 import { useSearch } from "../../context/SearchContext";
-import { Loader2, DollarSign, TrendingUp, Percent } from "lucide-react";
+import { Loader2, DollarSign, TrendingUp, Percent } from "../../components/Icons";
 import toast, { Toaster } from "react-hot-toast";
 import StatCard from "../../components/common/StatCard";
 import DataTable from "../../components/common/DataTable";

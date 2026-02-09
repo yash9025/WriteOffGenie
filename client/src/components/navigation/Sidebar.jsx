@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { X, Menu, LogOut, Search } from "lucide-react";
+import { X, Menu, LogOut, Search } from "../Icons";
 import { useAuth } from "../../context/AuthContext";
 import { useSearch } from "../../context/SearchContext";
 import logo from "../../assets/logo_writeoffgenie.svg";

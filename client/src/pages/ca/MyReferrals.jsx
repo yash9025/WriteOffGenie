@@ -3,7 +3,8 @@ import { collection, query, where, getDocs, doc, onSnapshot } from "firebase/fir
 import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
 import { useSearch } from "../../context/SearchContext";
-import { Loader2, ChevronDown, Copy, Check } from "lucide-react";
+import { Loader2, ChevronDown, Copy, Check } from "../../components/Icons";
+import toast, { Toaster } from "react-hot-toast";
 
 // Empty state illustration
 const EmptyIllustration = () => (
@@ -53,7 +54,8 @@ export default function MyReferrals() {
     fetchAll();
 
     return () => unsubProfile();
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
 
   // Filter Logic
   const filtered = referrals.filter(c => {
@@ -234,6 +236,7 @@ export default function MyReferrals() {
           </div>
         </div>
       )}
+      <Toaster position="top-right" />
     </div>
   );
 }

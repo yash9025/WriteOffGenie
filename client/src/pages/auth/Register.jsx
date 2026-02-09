@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { httpsCallable } from "firebase/functions";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
-import { Loader2, ShieldAlert } from "lucide-react";
+import { Loader2, ShieldAlert } from "../../components/Icons";
 import { functions, auth } from "../../services/firebase";
 import toast, { Toaster } from "react-hot-toast";
 import LoginImage from "../../assets/LoginImage.webp";

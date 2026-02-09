@@ -1,5 +1,5 @@
 import React from "react";
-import { Search, Loader2 } from "lucide-react";
+import { Search, Loader2 } from "../Icons";
 
 /**
  * Reusable Data Table Component
