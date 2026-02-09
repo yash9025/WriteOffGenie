@@ -43,8 +43,16 @@
             background-color: #011C39; color: white;
             text-decoration: none; border-radius: 8px;
             font-weight: 500; font-size: 15px;
-            transition: transform 0.2s;
+            transition: all 0.2s;
             cursor: pointer;
+            border: none;
+        }
+        .btn:hover {
+            background-color: #023057;
+            transform: translateY(-1px);
+        }
+        .btn:active {
+            transform: translateY(0);
         }
     </style>
 </head>
@@ -75,28 +83,80 @@
         btn.href = deepLink;
 
         // Copy logic ONLY on click (Stops the permission popup)
-        btn.addEventListener('click', () => {
-             if (rawCode && navigator.clipboard) {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (rawCode && navigator.clipboard) {
                 navigator.clipboard.writeText(rawCode).catch(() => {});
             }
+            // Try opening app again
+            tryOpenApp();
         });
+
+        // Track if app opened successfully
+        let appOpened = false;
+        let startTime = Date.now();
+
+        // Detect if user left page (app likely opened)
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                appOpened = true;
+            }
+        });
+
+        // Detect if window lost focus (app opened)
+        window.addEventListener('blur', () => {
+            appOpened = true;
+        });
+
+        // Function to try opening the app
+        function tryOpenApp() {
+            appOpened = false;
+            startTime = Date.now();
+            
+            // Method 1: Direct link (works on Android, newer iOS)
+            window.location.href = deepLink;
+            
+            // Method 2: iframe fallback for iOS
+            setTimeout(() => {
+                if (!appOpened) {
+                    const iframe = document.createElement('iframe');
+                    iframe.style.display = 'none';
+                    iframe.src = deepLink;
+                    document.body.appendChild(iframe);
+                    setTimeout(() => {
+                        document.body.removeChild(iframe);
+                    }, 500);
+                }
+            }, 300);
+        }
 
         // --- EXECUTION ---
         
         // 1. Try to open the app immediately
-        window.location.href = deepLink;
+        tryOpenApp();
 
-        // 2. Wait 2.5 seconds. If the page is still visible, the app didn't open.
+        // 2. Wait 3 seconds. If the page is still visible and app didn't open, show fallback.
         setTimeout(() => {
-            // Update UI to show "App not present"
-            document.getElementById('status').innerText = "App not present";
-            document.getElementById('sub-status').innerText = "We could not launch the app automatically.";
+            const elapsed = Date.now() - startTime;
             
-            // Hide spinner, show manual button
-            document.querySelector('.spinner').style.display = 'none';
-            btn.style.display = "inline-block";
+            // If app opened (user left page), do nothing
+            if (appOpened || document.hidden) {
+                return;
+            }
             
-        }, 2500);
+            // If we're still here after 3 seconds, app didn't open
+            if (elapsed >= 2800) {
+                // Update UI to show "App not present"
+                document.getElementById('status').innerText = "App not installed?";
+                document.getElementById('sub-status').innerText = "Please install the WriteOffGenie app first, then click the button below.";
+                
+                // Hide spinner, show manual button
+                document.querySelector('.spinner').style.display = 'none';
+                btn.style.display = "inline-block";
+                btn.textContent = "Open WriteOffGenie App";
+            }
+            
+        }, 3000);
 
     </script>
 </body>
