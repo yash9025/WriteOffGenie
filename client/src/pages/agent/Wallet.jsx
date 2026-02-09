@@ -269,7 +269,7 @@ export default function AgentWallet() {
         </div>
         <button 
           onClick={() => setShowWithdrawModal(true)}
-          className="bg-black hover:bg-gray-800 cursor-pointer text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-all active:scale-95 cursor-pointer"
+          className="bg-black hover:bg-gray-800 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-all active:scale-95 cursor-pointer"
         >
           Request withdrawal
         </button>

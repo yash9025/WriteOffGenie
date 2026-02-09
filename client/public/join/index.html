@@ -3,16 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Opening WriteOffGenie...</title>
+    <title>Testing Deep Link...</title>
     
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
-
-    <meta property="og:title" content="Join WriteOffGenie">
-    <meta property="og:description" content="Tap to complete your signup.">
-    <meta property="og:image" content="https://writeoffgenie.ai/logo_writeoffgenie.png">
-
     <style>
         body {
             font-family: -apple-system, system-ui, Roboto, sans-serif;
@@ -22,137 +14,85 @@
             justify-content: center;
             height: 100vh;
             margin: 0;
-            background-color: #f9fafb;
+            background-color: #f3f4f6;
             text-align: center;
             padding: 20px;
         }
-        .logo { width: 80px; height: 80px; margin-bottom: 24px; }
+        .logo { width: 80px; height: 80px; margin-bottom: 24px; border-radius: 12px; }
         .spinner {
-            border: 3px solid rgba(1, 28, 57, 0.1);
+            border: 3px solid rgba(0, 0, 0, 0.1);
             width: 32px; height: 32px; border-radius: 50%;
-            border-left-color: #011C39;
+            border-left-color: #ff0000; /* YouTube Red */
             animation: spin 1s linear infinite;
             margin-bottom: 20px;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        h2 { color: #011C39; margin: 0 0 10px 0; font-size: 20px; font-weight: 600; }
+        h2 { color: #111827; margin: 0 0 10px 0; font-size: 20px; font-weight: 600; }
         p { color: #6b7280; font-size: 14px; margin: 0 0 30px 0; max-width: 300px; line-height: 1.5; }
         .btn {
-            display: none; /* Hidden by default */
+            display: none;
             padding: 12px 30px;
-            background-color: #011C39; color: white;
+            background-color: #ff0000; color: white;
             text-decoration: none; border-radius: 8px;
             font-weight: 500; font-size: 15px;
-            transition: all 0.2s;
             cursor: pointer;
-            border: none;
-        }
-        .btn:hover {
-            background-color: #023057;
-            transform: translateY(-1px);
-        }
-        .btn:active {
-            transform: translateY(0);
         }
     </style>
 </head>
 <body>
 
-    <img src="../favicon_writeoffgenie.svg" alt="Logo" class="logo" onerror="this.style.display='none'">
-    
     <div class="spinner"></div>
-    <h2 id="status">Launching App...</h2>
-    <p id="sub-status">Connecting your invite code.</p>
+    <h2 id="status">Testing Deep Link...</h2>
+    <p id="sub-status">Attempting to open YouTube app for verification.</p>
 
-    <a id="manual-btn" href="#" class="btn">Try Open App Again</a>
+    <a id="manual-btn" href="#" class="btn">Click to Open YouTube Manually</a>
 
     <script>
-        // --- 1. CONFIGURATION ---
-        const SCHEME_PREFIX = "writeoffgenie://writeoffgenie.com/signuppage";
+        // --- 1. CONFIGURATION (TESTING WITH YOUTUBE) ---
+        // On mobile, youtube:// usually opens the app. 
+        // We'll try to pass the ref code as a search parameter for the test.
+        const SCHEME_PREFIX = "youtube://www.youtube.com/results?search_query=";
 
         // --- 2. LOGIC ---
         const params = new URLSearchParams(window.location.search);
-        let rawCode = params.get('ref') || params.get('code') || '';
+        let rawCode = params.get('ref') || params.get('code') || 'CA-926C21';
         const refCode = encodeURIComponent(rawCode);
         
-        // Build the deep link
-        const deepLink = `${SCHEME_PREFIX}?ref=${refCode}`;
+        const deepLink = `${SCHEME_PREFIX}${refCode}`;
         
-        // Setup Button (In case they need to click manually)
         const btn = document.getElementById('manual-btn');
-        btn.href = deepLink;
+        btn.href = deepLink; // Set the direct link here
 
-        // Button click handler - just open the app
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            tryOpenApp();
-        });
-
-        // Track if app opened successfully
         let appOpened = false;
-        let startTime = Date.now();
 
-        // Detect if user left page (app likely opened)
+        // Detect if user left page
         document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                appOpened = true;
-            }
+            if (document.hidden) appOpened = true;
         });
-
-        // Detect if window lost focus (app opened)
         window.addEventListener('blur', () => {
             appOpened = true;
         });
 
-        // Function to try opening the app
         function tryOpenApp() {
-            appOpened = false;
-            startTime = Date.now();
-            
-            // Method 1: Direct link (works on Android, newer iOS)
+            // Attempt auto-redirect
             window.location.href = deepLink;
             
-            // Method 2: iframe fallback for iOS
+            // Fallback UI
             setTimeout(() => {
                 if (!appOpened) {
-                    const iframe = document.createElement('iframe');
-                    iframe.style.display = 'none';
-                    iframe.src = deepLink;
-                    document.body.appendChild(iframe);
-                    setTimeout(() => {
-                        document.body.removeChild(iframe);
-                    }, 500);
+                    document.getElementById('status').innerText = "YouTube didn't open?";
+                    document.getElementById('sub-status').innerText = "If the app is installed, your browser might be blocking the auto-redirect. Try clicking below.";
+                    document.querySelector('.spinner').style.display = 'none';
+                    btn.style.display = "inline-block";
                 }
-            }, 300);
+            }, 3000);
         }
 
-        // --- EXECUTION ---
-        
-        // 1. Try to open the app immediately
-        tryOpenApp();
-
-        // 2. Wait 3 seconds. If the page is still visible and app didn't open, show fallback.
-        setTimeout(() => {
-            const elapsed = Date.now() - startTime;
-            
-            // If app opened (user left page), do nothing
-            if (appOpened || document.hidden) {
-                return;
-            }
-            
-            // If we're still here after 3 seconds, app didn't open
-            if (elapsed >= 2800) {
-                // Update UI to show "App not present"
-                document.getElementById('status').innerText = "App not installed?";
-                document.getElementById('sub-status').innerText = "Please install the WriteOffGenie app first, then click the button below.";
-                
-                // Hide spinner, show manual button
-                document.querySelector('.spinner').style.display = 'none';
-                btn.style.display = "inline-block";
-                btn.textContent = "Open WriteOffGenie App";
-            }
-            
-        }, 3000);
+        // --- 3. EXECUTION ---
+        window.onload = () => {
+            // Wait 500ms to let the browser stabilize
+            setTimeout(tryOpenApp, 500);
+        };
 
     </script>
 </body>
