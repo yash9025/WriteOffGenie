@@ -82,13 +82,9 @@
         const btn = document.getElementById('manual-btn');
         btn.href = deepLink;
 
-        // Copy logic ONLY on click (Stops the permission popup)
+        // Button click handler - just open the app
         btn.addEventListener('click', (e) => {
             e.preventDefault();
-            if (rawCode && navigator.clipboard) {
-                navigator.clipboard.writeText(rawCode).catch(() => {});
-            }
-            // Try opening app again
             tryOpenApp();
         });
 
