@@ -28,6 +28,7 @@ import {
   LogOut,
   Sparkles,
   User,
+  Building2,
   Calendar as LucideCalendar,
   ShieldCheck,
   Clock as LucideClock,
@@ -62,6 +63,7 @@ export {
   LogOut,          // Sign out action
   Sparkles,        // Special/premium feature
   User,            // User profile
+  Building2,       // Building/company
   ShieldCheck,     // Verified/secure
   Search,          // Search functionality
   Download,        // Download action

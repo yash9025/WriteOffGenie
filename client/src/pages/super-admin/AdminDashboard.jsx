@@ -38,7 +38,9 @@ export default function AdminDashboard() {
     totalComm: 0,
     totalPending: 0,
     activeUsers: 0,
-    chartData: []
+    chartData: [],
+    agentComm: 0,
+    cpaComm: 0
   });
 
   const formatCurrency = (value) => `$${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
@@ -55,46 +57,104 @@ export default function AdminDashboard() {
         const clients = clientsSnap.docs.map(d => ({ ...d.data(), createdAt: d.data().createdAt?.toDate() }));
         const payouts = payoutsSnap.docs.map(d => d.data());
         
-        // Build a map of partner commissionRate by id
-        const partnerRates = {};
+        console.log(`📊 Loaded ${clients.length} clients, ${partnersSnap.docs.length} partners`);
+        console.log('Clients with subscriptions:', clients.filter(c => c.subscription?.amountPaid).length);
+        
+        // Build a map of partner commissionRate and role by id
+        const partnerInfo = {};
         partnersSnap.docs.forEach(d => {
-          partnerRates[d.id] = (d.data().commissionRate || 10) / 100;
+          const data = d.data();
+          // Handle different possible role field names and values
+          let role = 'cpa'; // default
+          
+          // Check all possible role fields
+          const roleValue = data.role || data.userType || data.partnerRole || data.type || '';
+          const roleStr = String(roleValue).toLowerCase().trim();
+          
+          // Check if it contains 'agent' anywhere
+          if (roleStr.includes('agent')) {
+            role = 'agent';
+          } else if (roleStr.includes('cpa') || roleStr.includes('ca')) {
+            role = 'cpa';
+          }
+          
+          partnerInfo[d.id] = {
+            rate: (data.commissionRate || 10) / 100,
+            role: role,
+            name: data.name || data.displayName || 'Unknown',
+            rawRole: roleValue, // Keep original for debugging
+            totalEarnings: data.stats?.totalEarnings || 0, // Use actual earnings from Partner stats
+            totalRevenue: data.stats?.totalRevenue || 0
+          };
         });
+
+        console.log('✅ Partner Info Map:', partnerInfo); // Debug log
 
         // KPIs
         const totalRev = clients.reduce((acc, c) => acc + (c.subscription?.amountPaid || 0), 0);
         
-        // Calculate total commission using each partner's specific rate
-        const totalComm = clients.reduce((acc, c) => {
-          if (c.subscription?.amountPaid && c.referredBy && partnerRates[c.referredBy]) {
-            return acc + (c.subscription.amountPaid * partnerRates[c.referredBy]);
-          } else if (c.subscription?.amountPaid && c.referredBy) {
-            return acc + (c.subscription.amountPaid * 0.10); // Default 10%
+        // Calculate total commission from Partner stats (more accurate)
+        let agentComm = 0;
+        let cpaComm = 0;
+        
+        Object.values(partnerInfo).forEach(partner => {
+          if (partner.role === 'agent') {
+            agentComm += partner.totalEarnings;
+            console.log(`✅ Agent ${partner.name}: $${partner.totalEarnings}`);
+          } else {
+            cpaComm += partner.totalEarnings;
+            console.log(`✅ CPA ${partner.name}: $${partner.totalEarnings}`);
           }
-          return acc;
-        }, 0);
+        });
+        
+        const totalComm = agentComm + cpaComm;
         
         const totalPending = payouts.filter(p => p.status === 'pending').reduce((acc, p) => acc + p.amount, 0);
         const activeUsers = clients.filter(c => c.subscription?.status === 'active').length;
 
-        // Chart Data (Monthly)
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const monthlyData = months.map(m => ({ name: m, revenue: 0, commission: 0 }));
+        console.log('📊 FINAL TOTALS:');
+        console.log('  Agent Commission:', agentComm);
+        console.log('  CPA Commission:', cpaComm);
+        console.log('  Total Commission:', totalComm);
 
+        // Chart Data (Monthly) - Use client subscription dates for revenue, partner data for commissions
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const monthlyData = months.map(m => ({ name: m, revenue: 0, commission: 0, agentCommission: 0, cpaCommission: 0 }));
+
+        // Add revenue from clients
         clients.forEach(client => {
           if (!client.createdAt) return;
           const monthIndex = client.createdAt.getMonth();
           const amt = client.subscription?.amountPaid || 0;
           monthlyData[monthIndex].revenue += amt;
-          
-          // Use partner-specific commission rate for chart
-          const partnerRate = client.referredBy && partnerRates[client.referredBy] 
-            ? partnerRates[client.referredBy] 
-            : 0.10;
-          monthlyData[monthIndex].commission += (amt * partnerRate);
         });
 
-        setData({ totalRev, totalComm, totalPending, activeUsers, chartData: monthlyData });
+        // Add commission from partners based on their totalRevenue
+        partnersSnap.docs.forEach(d => {
+          const data = d.data();
+          const createdAt = data.createdAt?.toDate?.();
+          if (!createdAt) return;
+          
+          const monthIndex = createdAt.getMonth();
+          const earnings = data.stats?.totalEarnings || 0;
+          
+          const roleValue = data.role || data.userType || '';
+          const role = String(roleValue).toLowerCase().includes('agent') ? 'agent' : 'cpa';
+          
+          monthlyData[monthIndex].commission += earnings;
+          
+          if (role === 'agent') {
+            monthlyData[monthIndex].agentCommission += earnings;
+            console.log(`📅 ${months[monthIndex]}: Agent commission +$${earnings.toFixed(2)}`);
+          } else {
+            monthlyData[monthIndex].cpaCommission += earnings;
+            console.log(`📅 ${months[monthIndex]}: CPA commission +$${earnings.toFixed(2)}`);
+          }
+        });
+
+        console.log('📈 Monthly Chart Data:', monthlyData);
+
+        setData({ totalRev, totalComm, totalPending, activeUsers, chartData: monthlyData, agentComm, cpaComm });
 
       } catch (e) {
         console.error(e);
@@ -153,7 +213,7 @@ export default function AdminDashboard() {
 
       {/* Chart */}
       <div className="bg-white border border-[#E3E6EA] rounded-[20px] p-6 shadow-sm">
-        <h2 className="text-xl font-semibold text-[#111111] mb-6">Commission Overview</h2>
+        <h2 className="text-xl font-semibold text-[#111111] mb-6">Revenue & Commission Overview</h2>
         <div className="h-75 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data.chartData} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
@@ -177,7 +237,7 @@ export default function AdminDashboard() {
               <Line 
                 type="monotone" 
                 dataKey="revenue" 
-                name="Platform Revenue"
+                name="Total Revenue"
                 stroke="#0F1728" 
                 strokeWidth={3} 
                 dot={false}
@@ -185,12 +245,21 @@ export default function AdminDashboard() {
               />
               <Line 
                 type="monotone" 
-                dataKey="commission" 
+                dataKey="cpaCommission" 
                 name="CPA Commission"
                 stroke="#00D1A0" 
                 strokeWidth={3} 
                 dot={false}
                 activeDot={{ r: 6, strokeWidth: 0, fill: "#00D1A0" }}
+              />
+              <Line 
+                type="monotone" 
+                dataKey="agentCommission" 
+                name="Agent Commission"
+                stroke="#4D7CFE" 
+                strokeWidth={3} 
+                dot={false}
+                activeDot={{ r: 6, strokeWidth: 0, fill: "#4D7CFE" }}
               />
             </LineChart>
           </ResponsiveContainer>

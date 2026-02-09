@@ -5,8 +5,119 @@ import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
 import { useSearch } from "../../context/SearchContext";
 import toast, { Toaster } from "react-hot-toast"; 
-import { Loader2, ChevronDown, X } from "../../components/Icons";
+import { Loader2, ChevronDown, X, Eye } from "../../components/Icons";
 import { RevenueIcon, PendingIcon, WalletIconLarge, TotalPaidIcon, EmptyPayoutIllustration as EmptyIllustration } from "../../components/Icons";
+
+// --- WITHDRAWAL DETAIL MODAL (Read Only for Agent/CPA) ---
+const WithdrawalDetailModal = ({ payout, onClose }) => {
+  const formatDate = (timestamp) => {
+    if (!timestamp) return "N/A";
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  const getStatusBadge = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'pending': return <span className="px-3 py-1 bg-amber-50 text-amber-600 rounded-full text-xs font-bold border border-amber-100">Pending</span>;
+      case 'approved': return <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-xs font-bold border border-blue-100">Approved</span>;
+      case 'paid': return <span className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-xs font-bold border border-emerald-100">Paid</span>;
+      case 'rejected': return <span className="px-3 py-1 bg-red-50 text-red-600 rounded-full text-xs font-bold border border-red-100">Rejected</span>;
+      default: return null;
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        
+        {/* Modal Header */}
+        <div className="px-8 py-6 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
+           <h3 className="text-xl font-bold text-slate-900">Withdrawal Details</h3>
+           <button 
+             onClick={onClose} 
+             className="p-2 hover:bg-slate-50 rounded-full text-slate-400 transition-colors cursor-pointer"
+           >
+             <X size={20}/>
+           </button>
+        </div>
+
+        {/* Modal Content */}
+        <div className="p-8 overflow-y-auto space-y-8 custom-scrollbar">
+           
+           {/* Section 1: Withdrawal Details */}
+           <div>
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-4">Withdrawal Information</h4>
+              <div className="grid grid-cols-3 gap-6">
+                 <div>
+                    <p className="text-xs text-slate-400 font-medium mb-1">Requested amount</p>
+                    <p className="text-lg font-bold text-slate-900">${payout.amount.toLocaleString()}</p>
+                 </div>
+                 <div>
+                    <p className="text-xs text-slate-400 font-medium mb-1">Request date</p>
+                    <p className="text-sm font-bold text-slate-900">{formatDate(payout.requestedAt)}</p>
+                 </div>
+                 <div>
+                    <p className="text-xs text-slate-400 font-medium mb-1">Status</p>
+                    {getStatusBadge(payout.status)}
+                 </div>
+              </div>
+           </div>
+
+           <div className="h-px bg-slate-100 w-full"></div>
+
+           {/* Section 2: Bank Details */}
+           <div>
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-4">Bank Account Details</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                 <div>
+                    <p className="text-xs text-slate-400 font-medium mb-1">Company Name</p>
+                    <p className="text-sm font-bold text-slate-900">{payout.bankSnapshot?.companyName || "N/A"}</p>
+                 </div>
+                 <div>
+                    <p className="text-xs text-slate-400 font-medium mb-1">Routing Number</p>
+                    <p className="text-sm font-bold text-slate-900 font-mono">{payout.bankSnapshot?.routingNumber || "N/A"}</p>
+                 </div>
+                 <div>
+                    <p className="text-xs text-slate-400 font-medium mb-1">Account Number</p>
+                    <p className="text-sm font-bold text-slate-900 font-mono">••••{payout.bankSnapshot?.accountNumber?.slice(-4) || "N/A"}</p>
+                 </div>
+                 <div>
+                    <p className="text-xs text-slate-400 font-medium mb-1">Account Type</p>
+                    <p className="text-sm font-bold text-slate-900 capitalize">{payout.bankSnapshot?.accountType || "N/A"}</p>
+                 </div>
+              </div>
+           </div>
+
+           {/* Section 3: Additional Info */}
+           {(payout.rejectionReason || payout.remarks) && (
+             <>
+               <div className="h-px bg-slate-100 w-full"></div>
+               <div>
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-4">Additional Information</h4>
+                  <div>
+                     <p className="text-xs text-slate-400 font-medium mb-1">
+                       {payout.status === 'rejected' ? 'Rejection Reason' : 'Remarks'}
+                     </p>
+                     <p className="text-sm text-slate-900">{payout.rejectionReason || payout.remarks}</p>
+                  </div>
+               </div>
+             </>
+           )}
+        </div>
+
+        {/* Modal Footer */}
+        <div className="px-8 py-6 border-t border-slate-100 bg-slate-50 flex gap-4 justify-end">
+           <button 
+             onClick={onClose} 
+             className="px-6 py-2.5 rounded-lg bg-black text-white font-bold text-sm hover:bg-gray-800 transition-all cursor-pointer"
+           >
+             Close
+           </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // --- STAT CARD ---
 const StatCard = ({ icon, label, value, description }) => (
@@ -40,6 +151,7 @@ export default function AgentWallet() {
   const [isRequesting, setIsRequesting] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [selectedPayout, setSelectedPayout] = useState(null);
 
   // --- LISTENERS ---
   useEffect(() => {
@@ -211,9 +323,10 @@ export default function AgentWallet() {
             <div className="hidden md:flex items-center justify-between text-[#9499A1] text-xs font-medium uppercase tracking-wider pb-3 border-b border-[#E3E6EA]">
               <p className="w-1/6">Date</p>
               <p className="w-1/6">Amount</p>
-              <p className="w-1/4">Bank Account</p>
+              <p className="w-1/5">Bank Account</p>
               <p className="w-1/6 text-center">Status</p>
-              <p className="w-1/4 text-right">Remarks</p>
+              <p className="w-1/5">Remarks</p>
+              <p className="w-1/6 text-right">Actions</p>
             </div>
 
             {/* Table Rows */}
@@ -252,7 +365,7 @@ export default function AgentWallet() {
                     <p className="text-[#111111] text-sm font-medium">{amountDisplay}</p>
                   </div>
 
-                  <div className="w-full md:w-1/4 mb-2 md:mb-0 flex justify-between md:block">
+                  <div className="w-full md:w-1/5 mb-2 md:mb-0 flex justify-between md:block">
                     <span className="md:hidden text-xs text-[#9499A1]">Bank:</span>
                     <p className="text-[#111111] text-sm truncate" title={bankDisplay}>{bankDisplay}</p>
                   </div>
@@ -266,9 +379,19 @@ export default function AgentWallet() {
                     </span>
                   </div>
 
-                  <div className="w-full md:w-1/4 text-left md:text-right">
+                  <div className="w-full md:w-1/5 text-left mb-2 md:mb-0">
                     <span className="md:hidden text-xs text-[#9499A1] mr-2">Remarks:</span>
                     <p className="text-[#9499A1] text-xs truncate" title={remarksDisplay}>{remarksDisplay}</p>
+                  </div>
+
+                  <div className="w-full md:w-1/6 text-left md:text-right">
+                    <button 
+                      onClick={() => setSelectedPayout(item)} 
+                      className="px-4 py-1.5 border border-[#E3E6EA] rounded-lg text-xs font-bold text-[#9499A1] hover:bg-[#4D7CFE] hover:text-white hover:border-[#4D7CFE] transition-all shadow-sm cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <Eye size={14} />
+                      View
+                    </button>
                   </div>
 
                 </div>
@@ -398,6 +521,14 @@ export default function AgentWallet() {
 
           </div>
         </div>
+      )}
+
+      {/* --- WITHDRAWAL DETAIL MODAL --- */}
+      {selectedPayout && (
+        <WithdrawalDetailModal 
+          payout={selectedPayout} 
+          onClose={() => setSelectedPayout(null)} 
+        />
       )}
     </div>
   );

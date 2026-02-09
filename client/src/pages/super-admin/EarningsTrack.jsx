@@ -161,7 +161,7 @@ export default function EarningsTracking() {
         </div>
         <button 
           onClick={downloadCSV}
-          className="bg-[#4D7CFE] hover:bg-[#3D6CED] text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-all shadow-sm flex items-center gap-2 cursor-pointer"
+          className="bg-black hover:bg-gray-800 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-all shadow-sm flex items-center gap-2 cursor-pointer"
         >
             <Download size={16}/> Download report
         </button>

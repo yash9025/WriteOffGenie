@@ -4,7 +4,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../services/firebase";
 import toast, { Toaster } from "react-hot-toast";
 import { 
-  Loader2, X, Search, Clock, Wallet, ShieldAlert
+  Loader2, X, Search, Clock, Wallet, ShieldAlert, User, Building2
 } from "../../components/Icons";
 
 // --- REJECTION REASON MODAL ---
