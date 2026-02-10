@@ -43,6 +43,20 @@ const CPAManagement = () => {
   // --- DATA FETCHING ---
   const fetchCPAs = async () => {
     try {
+      // Pricing lookup
+      const PLAN_PRICES = {
+        'writeoffgenie-premium-month': 25.00,
+        'com.writeoffgenie.premium.monthly': 25.00,
+        'writeoffgenie-pro-month': 15.00,
+        'com.writeoffgenie.pro.monthly': 15.00,
+        'writeoffgenie-premium-year': 239.99,
+        'com.writeoffgenie.premium.yearly': 239.99,
+        'writeoffgenie-pro-year': 143.99,
+        'com.writeoffgenie.pro.yearly': 143.99,
+      };
+      const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
+      const now = new Date();
+
       const cpasQuery = query(
         collection(db, "Partners"),
         where("referredBy", "==", user.uid),
@@ -52,29 +66,58 @@ const CPAManagement = () => {
       const snapshot = await getDocs(cpasQuery);
       const cpasData = [];
       
-      // Fetch clients for each CPA to calculate stats
+      // Fetch users for each CPA to calculate stats
       for (const doc of snapshot.docs) {
         const cpaData = { id: doc.id, ...doc.data() };
+        const cpaReferralCode = cpaData.referralCode;
         
-        const clientsQuery = query(
-          collection(db, "Clients"),
-          where("referredBy", "==", doc.id)
-        );
-        const clientsSnapshot = await getDocs(clientsQuery);
-        const clients = clientsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        let totalRevenue = 0;
+        let activeClients = 0;
+        let totalClients = 0;
         
-        const totalRevenue = clients.reduce((sum, client) => 
-          sum + (client.subscription?.amountPaid || 0), 0
-        );
+        if (cpaReferralCode) {
+          // Get users with this CPA's referral code
+          const usersQuery = query(
+            collection(db, "user"),
+            where("referral_code", "==", cpaReferralCode)
+          );
+          const usersSnapshot = await getDocs(usersQuery);
+          totalClients = usersSnapshot.size;
+          
+          for (const userDoc of usersSnapshot.docs) {
+            const userId = userDoc.id;
+            
+            // Fetch subscriptions for this user
+            const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
+            let userIsActive = false;
+            
+            for (const subDoc of subsSnap.docs) {
+              const subData = subDoc.data();
+              const price = getPlanPrice(subData.planname);
+              totalRevenue += price;
+              
+              // Check if subscription is active
+              let expirationDate = subData.expiration_date;
+              if (expirationDate?.toDate) expirationDate = expirationDate.toDate();
+              else if (typeof expirationDate === 'string') expirationDate = new Date(expirationDate);
+              
+              if (subData.status === 'active' && expirationDate && expirationDate > now) {
+                userIsActive = true;
+              }
+            }
+            
+            if (userIsActive) activeClients++;
+          }
+        }
+        
         const cpaRate = (cpaData.commissionRate || 10) / 100;
         const totalEarnings = totalRevenue * cpaRate;
-        const activeClients = clients.filter(c => c.subscription?.status === 'active').length;
         
         cpaData.calculatedStats = {
           totalRevenue,
           totalEarnings,
           activeClients,
-          totalClients: clients.length
+          totalClients
         };
         
         cpasData.push(cpaData);
@@ -84,30 +127,14 @@ const CPAManagement = () => {
       setCPAs(cpasData);
 
       // Overall Stats Calculation
-      const cpaIds = cpasData.map(cpa => cpa.id);
       const totalRevenue = cpasData.reduce((sum, cpa) => sum + (cpa.calculatedStats?.totalRevenue || 0), 0);
       const totalCPACommission = cpasData.reduce((sum, cpa) => sum + (cpa.calculatedStats?.totalEarnings || 0), 0);
       const activeSubscriptions = cpasData.reduce((sum, cpa) => sum + (cpa.calculatedStats?.activeClients || 0), 0);
       
-      let pendingAmount = 0;
-      if (cpaIds.length > 0) {
-        const batchSize = 10;
-        for (let i = 0; i < cpaIds.length; i += batchSize) {
-          const batchIds = cpaIds.slice(i, i + batchSize);
-          const payoutsQuery = query(
-            collection(db, "Payouts"),
-            where("partner_id", "in", batchIds),
-            where("status", "==", "pending")
-          );
-          const payoutsSnapshot = await getDocs(payoutsQuery);
-          pendingAmount += payoutsSnapshot.docs.reduce((sum, doc) => sum + (doc.data().amount || 0), 0);
-        }
-      }
-      
       setStats({
         totalRevenue,
         totalCPACommission,
-        pendingWithdrawals: pendingAmount,
+        pendingWithdrawals: 0,
         activeSubscriptions
       });
 

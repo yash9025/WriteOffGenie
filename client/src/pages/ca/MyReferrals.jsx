@@ -33,25 +33,100 @@ export default function MyReferrals() {
   useEffect(() => {
     if (!user) return;
 
-    // Listen to profile for stats
-    const unsubProfile = onSnapshot(doc(db, "Partners", user.uid), (docSnap) => {
-      if (docSnap.exists()) setProfile(docSnap.data());
+    // Listen to profile for stats and referral code
+    const unsubProfile = onSnapshot(doc(db, "Partners", user.uid), async (docSnap) => {
+      if (docSnap.exists()) {
+        setProfile(docSnap.data());
+        await fetchReferrals(docSnap.data().referralCode);
+      }
     });
 
-    const fetchAll = async () => {
+    const fetchReferrals = async (cpaReferralCode) => {
+      if (!cpaReferralCode) {
+        setReferrals([]);
+        setLoading(false);
+        return;
+      }
+
       try {
-        const q = query(collection(db, "Clients"), where("referredBy", "==", user.uid));
+        // Pricing lookup
+        const PLAN_PRICES = {
+          'writeoffgenie-premium-month': 25.00,
+          'com.writeoffgenie.premium.monthly': 25.00,
+          'writeoffgenie-pro-month': 15.00,
+          'com.writeoffgenie.pro.monthly': 15.00,
+          'writeoffgenie-premium-year': 239.99,
+          'com.writeoffgenie.premium.yearly': 239.99,
+          'writeoffgenie-pro-year': 143.99,
+          'com.writeoffgenie.pro.yearly': 143.99,
+        };
+        const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
+        const now = new Date();
+
+        // Query users with this CPA's referral code
+        const q = query(collection(db, "user"), where("referral_code", "==", cpaReferralCode));
         const querySnapshot = await getDocs(q);
-        const clients = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        clients.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-        setReferrals(clients);
-      } catch (error) { 
-        console.error(error); 
-      } finally { 
-        setLoading(false); 
+        const usersData = [];
+
+        for (const userDoc of querySnapshot.docs) {
+          const userId = userDoc.id;
+          const userData = userDoc.data();
+
+          // Fetch all subscriptions for this user
+          const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
+
+          let totalRevenue = 0;
+          let isActive = false;
+          let latestPlan = null;
+          const subscriptions = [];
+
+          for (const subDoc of subsSnap.docs) {
+            const subData = subDoc.data();
+            const price = getPlanPrice(subData.planname);
+            totalRevenue += price;
+            subscriptions.push({ id: subDoc.id, ...subData, price });
+
+            // Check active status
+            let expirationDate = subData.expiration_date;
+            if (expirationDate?.toDate) {
+              expirationDate = expirationDate.toDate();
+            } else if (typeof expirationDate === 'string') {
+              expirationDate = new Date(expirationDate);
+            }
+
+            if (subData.status === 'active' && expirationDate && expirationDate > now) {
+              isActive = true;
+              latestPlan = subData.planname;
+            }
+          }
+
+          usersData.push({
+            id: userId,
+            name: userData.display_name || userData.name || 'Unknown',
+            email: userData.email || '',
+            phone: userData.phone || '',
+            subscriptions,
+            totalRevenue,
+            isActive,
+            latestPlan,
+            createdAt: userData.created_time
+          });
+        }
+
+        // Sort by newest first
+        usersData.sort((a, b) => {
+          const aTime = a.createdAt?.seconds || a.createdAt?.getTime?.() || 0;
+          const bTime = b.createdAt?.seconds || b.createdAt?.getTime?.() || 0;
+          return bTime - aTime;
+        });
+
+        setReferrals(usersData);
+      } catch (error) {
+        console.error("Error fetching referrals:", error);
+      } finally {
+        setLoading(false);
       }
     };
-    fetchAll();
 
     return () => unsubProfile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -65,8 +140,8 @@ export default function MyReferrals() {
       c.phone?.toLowerCase().includes(searchQuery.toLowerCase());
     
     if (statusFilter === "all") return matchesSearch;
-    if (statusFilter === "subscribed") return matchesSearch && c.subscription?.status === "active";
-    if (statusFilter === "free") return matchesSearch && c.subscription?.status !== "active";
+    if (statusFilter === "subscribed") return matchesSearch && c.isActive;
+    if (statusFilter === "free") return matchesSearch && !c.isActive;
     return matchesSearch;
   });
 
@@ -182,21 +257,21 @@ export default function MyReferrals() {
           <div className="flex flex-col gap-2">
             {filtered.length > 0 ? (
               filtered.map((client) => {
-                const hasSubscription = client.subscription?.planType && client.subscription?.status === "active";
-                const planName = hasSubscription ? client.subscription.planType : "Free Plan";
-                const isActive = true;
-                const dateStr = client.createdAt?.toDate().toLocaleDateString('en-US', { 
-                  month: 'short', day: 'numeric', year: 'numeric' 
-                });
+                const planName = client.latestPlan 
+                  ? client.latestPlan.replace('writeoffgenie-', '').replace('com.writeoffgenie.', '').replace('.monthly', '').replace('.yearly', '')
+                  : "Free Plan";
+                const dateStr = client.createdAt?.toDate 
+                  ? client.createdAt.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                  : 'N/A';
                 const commissionRate = profile?.commissionRate || 10;
-                const commission = ((client.subscription?.amountPaid || 0) * (commissionRate / 100)).toFixed(2);
+                const commission = (client.totalRevenue * (commissionRate / 100)).toFixed(2);
 
                 return (
                   <div key={client.id} className="flex flex-col md:flex-row md:items-center justify-between p-3 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-[#E3E6EA]">
                     
                     <div className="w-full md:w-1/4 mb-2 md:mb-0">
-                      <p className="text-[#111111] text-sm font-medium truncate" title={client.email}>{client.email}</p>
-                      <p className="text-[#9499A1] text-xs md:hidden">{client.name}</p>
+                      <p className="text-[#111111] text-sm font-medium truncate" title={client.name}>{client.name}</p>
+                      <p className="text-[#9499A1] text-xs truncate">{client.email}</p>
                     </div>
 
                     <div className="w-full md:w-1/5 mb-2 md:mb-0 flex justify-between md:block">
@@ -206,16 +281,16 @@ export default function MyReferrals() {
 
                     <div className="w-full md:w-1/5 mb-2 md:mb-0 flex justify-between md:block">
                       <span className="md:hidden text-xs text-[#9499A1]">Plan:</span>
-                      <p className="text-[#111111] text-sm">{planName}</p>
+                      <p className="text-[#111111] text-sm capitalize">{planName}</p>
                     </div>
 
                     <div className="w-full md:w-1/6 mb-2 md:mb-0">
                       <span className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${
-                        isActive 
+                        client.isActive 
                           ? "bg-[#ECFDF5] text-[#059669] border border-[#A7F3D0]" 
                           : "bg-[#F3F4F6] text-[#6B7280] border border-[#E5E7EB]"
                       }`}>
-                        {isActive ? "Active" : "Inactive"}
+                        {client.isActive ? "Active" : "Free"}
                       </span>
                     </div>
 

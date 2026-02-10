@@ -1,7 +1,7 @@
 import React, { useEffect, useState} from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, getDocs, collectionGroup } from "firebase/firestore";
 import { db } from "../../services/firebase";
-import { Loader2, DollarSign, Percent, Wallet, Users } from "../../components/Icons";
+import { Loader2, DollarSign, Percent, Users } from "../../components/Icons";
 import StatCard from "../../components/common/StatCard";
 import toast, { Toaster } from "react-hot-toast";
 import { 
@@ -31,12 +31,24 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 // 3. MAIN DASHBOARD COMPONENT
 
+// Pricing lookup table (outside component to avoid re-creation)
+const PLAN_PRICES = {
+  'writeoffgenie-premium-month': 25.00,
+  'com.writeoffgenie.premium.monthly': 25.00,
+  'writeoffgenie-pro-month': 15.00,
+  'com.writeoffgenie.pro.monthly': 15.00,
+  'writeoffgenie-premium-year': 239.99,
+  'com.writeoffgenie.premium.yearly': 239.99,
+  'writeoffgenie-pro-year': 143.99,
+  'com.writeoffgenie.pro.yearly': 143.99,
+};
+const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
+
 export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({
     totalRev: 0,
     totalComm: 0,
-    totalPending: 0,
     activeUsers: 0,
     chartData: [],
     agentComm: 0,
@@ -48,113 +60,124 @@ export default function AdminDashboard() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [clientsSnap, payoutsSnap, partnersSnap] = await Promise.all([
-          getDocs(collection(db, "Clients")),
-          getDocs(collection(db, "Payouts")),
+        // 3 PARALLEL QUERIES - Fast for 500+ users
+        const [partnersSnap, usersSnap, allSubsSnap] = await Promise.all([
           getDocs(collection(db, "Partners")),
+          getDocs(collection(db, "user")),
+          getDocs(collectionGroup(db, "subscription")) // ALL subscriptions in ONE query!
         ]);
-
-        const clients = clientsSnap.docs.map(d => ({ ...d.data(), createdAt: d.data().createdAt?.toDate() }));
-        const payouts = payoutsSnap.docs.map(d => d.data());
         
-        console.log(`📊 Loaded ${clients.length} clients, ${partnersSnap.docs.length} partners`);
-        console.log('Clients with subscriptions:', clients.filter(c => c.subscription?.amountPaid).length);
+        // Build user map (userId -> referral_code)
+        const userRefCodes = {};
+        usersSnap.docs.forEach(d => {
+          const data = d.data();
+          userRefCodes[d.id] = data.referral_code || null;
+        });
         
-        // Build a map of partner commissionRate and role by id
-        const partnerInfo = {};
+        // Build partner maps
+        const partnerById = {};
+        const partnerByCode = {};
+        let totalCPACommission = 0;
+        
         partnersSnap.docs.forEach(d => {
           const data = d.data();
-          // Handle different possible role field names and values
-          let role = 'cpa'; // default
-          
-          // Check all possible role fields
-          const roleValue = data.role || data.userType || data.partnerRole || data.type || '';
-          const roleStr = String(roleValue).toLowerCase().trim();
-          
-          // Check if it contains 'agent' anywhere
-          if (roleStr.includes('agent')) {
-            role = 'agent';
-          } else if (roleStr.includes('cpa') || roleStr.includes('ca')) {
-            role = 'cpa';
-          }
-          
-          partnerInfo[d.id] = {
-            rate: (data.commissionRate || 10) / 100,
-            role: role,
-            name: data.name || data.displayName || 'Unknown',
-            rawRole: roleValue, // Keep original for debugging
-            totalEarnings: data.stats?.totalEarnings || 0, // Use actual earnings from Partner stats
-            totalRevenue: data.stats?.totalRevenue || 0
+          const role = String(data.role || '').toLowerCase().includes('agent') ? 'agent' : 'cpa';
+          const partner = {
+            id: d.id,
+            role,
+            referralCode: data.referralCode,
+            referredBy: data.referredBy,
+            commissionRate: (data.commissionRate || 10) / 100,
+            commissionPercentage: data.commissionPercentage || 15,
+            maintenanceCostPerUser: data.maintenanceCostPerUser || 6.00,
+            totalEarnings: data.stats?.totalEarnings || 0
           };
-        });
-
-        console.log('✅ Partner Info Map:', partnerInfo); // Debug log
-
-        // KPIs
-        const totalRev = clients.reduce((acc, c) => acc + (c.subscription?.amountPaid || 0), 0);
-        
-        // Calculate total commission from Partner stats (more accurate)
-        let agentComm = 0;
-        let cpaComm = 0;
-        
-        Object.values(partnerInfo).forEach(partner => {
-          if (partner.role === 'agent') {
-            agentComm += partner.totalEarnings;
-            console.log(`✅ Agent ${partner.name}: $${partner.totalEarnings}`);
-          } else {
-            cpaComm += partner.totalEarnings;
-            console.log(`✅ CPA ${partner.name}: $${partner.totalEarnings}`);
+          partnerById[d.id] = partner;
+          if (data.referralCode) partnerByCode[data.referralCode] = partner;
+          
+          if (role === 'cpa') {
+            totalCPACommission += partner.totalEarnings;
           }
         });
-        
-        const totalComm = agentComm + cpaComm;
-        
-        const totalPending = payouts.filter(p => p.status === 'pending').reduce((acc, p) => acc + p.amount, 0);
-        const activeUsers = clients.filter(c => c.subscription?.status === 'active').length;
 
-        console.log('📊 FINAL TOTALS:');
-        console.log('  Agent Commission:', agentComm);
-        console.log('  CPA Commission:', cpaComm);
-        console.log('  Total Commission:', totalComm);
-
-        // Chart Data (Monthly) - Use client subscription dates for revenue, partner data for commissions
+        // Process ALL subscriptions from collection group query
+        const now = new Date();
+        const agentData = {};
+        let totalRevenue = 0;
+        let activeUsersCount = 0;
+        
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const monthlyData = months.map(m => ({ name: m, revenue: 0, commission: 0, agentCommission: 0, cpaCommission: 0 }));
 
-        // Add revenue from clients
-        clients.forEach(client => {
-          if (!client.createdAt) return;
-          const monthIndex = client.createdAt.getMonth();
-          const amt = client.subscription?.amountPaid || 0;
-          monthlyData[monthIndex].revenue += amt;
-        });
-
-        // Add commission from partners based on their totalRevenue
-        partnersSnap.docs.forEach(d => {
-          const data = d.data();
-          const createdAt = data.createdAt?.toDate?.();
-          if (!createdAt) return;
+        allSubsSnap.docs.forEach(subDoc => {
+          const subData = subDoc.data();
           
-          const monthIndex = createdAt.getMonth();
-          const earnings = data.stats?.totalEarnings || 0;
+          const price = getPlanPrice(subData.planname);
+          if (price === 0) return;
           
-          const roleValue = data.role || data.userType || '';
-          const role = String(roleValue).toLowerCase().includes('agent') ? 'agent' : 'cpa';
+          // Add ALL subscription revenue to total
+          totalRevenue += price;
           
-          monthlyData[monthIndex].commission += earnings;
+          // Check if active for user count and commission calcs
+          const expirationDate = subData.expiration_date?.toDate?.();
+          const isActive = subData.status === 'active' && expirationDate && expirationDate > now;
+          if (isActive) activeUsersCount++;
           
-          if (role === 'agent') {
-            monthlyData[monthIndex].agentCommission += earnings;
-            console.log(`📅 ${months[monthIndex]}: Agent commission +$${earnings.toFixed(2)}`);
-          } else {
-            monthlyData[monthIndex].cpaCommission += earnings;
-            console.log(`📅 ${months[monthIndex]}: CPA commission +$${earnings.toFixed(2)}`);
+          // Add to monthly chart
+          const purchaseDate = subData.purchase_date?.toDate?.() || subData.created_Time?.toDate?.();
+          if (purchaseDate) {
+            const monthIndex = purchaseDate.getMonth();
+            monthlyData[monthIndex].revenue += price;
+          }
+          
+          // Get userId from doc path: user/{userId}/subscription/{subId}
+          const pathParts = subDoc.ref.path.split('/');
+          const userId = pathParts[1];
+          const refCode = userRefCodes[userId] || subData.ref_code;
+          const cpa = refCode ? partnerByCode[refCode] : null;
+          
+          // Track for agent commission calculation (only for active subscriptions)
+          if (isActive && cpa && cpa.referredBy) {
+            const agent = partnerById[cpa.referredBy];
+            if (agent && agent.role === 'agent') {
+              const agentId = cpa.referredBy;
+              if (!agentData[agentId]) {
+                agentData[agentId] = { 
+                  revenue: 0, 
+                  cpaCommissions: 0, 
+                  activeSubscriptions: 0,
+                  commissionRate: agent.commissionPercentage / 100,
+                  maintenanceCost: agent.maintenanceCostPerUser
+                };
+              }
+              const cpaComm = price * cpa.commissionRate;
+              agentData[agentId].revenue += price;
+              agentData[agentId].cpaCommissions += cpaComm;
+              agentData[agentId].activeSubscriptions++;
+            }
           }
         });
-
-        console.log('📈 Monthly Chart Data:', monthlyData);
-
-        setData({ totalRev, totalComm, totalPending, activeUsers, chartData: monthlyData, agentComm, cpaComm });
+        
+        // Calculate agent commissions using formula
+        let totalAgentCommission = 0;
+        Object.values(agentData).forEach(agent => {
+          const netRevenue = agent.revenue - agent.cpaCommissions;
+          const maintenanceCosts = agent.activeSubscriptions * agent.maintenanceCost;
+          const netProfit = netRevenue - maintenanceCosts;
+          const agentComm = Math.max(0, netProfit * agent.commissionRate);
+          totalAgentCommission += agentComm;
+        });
+        
+        const totalComm = totalAgentCommission + totalCPACommission;
+        
+        setData({ 
+          totalRev: totalRevenue, 
+          totalComm, 
+          activeUsers: activeUsersCount, 
+          chartData: monthlyData, 
+          agentComm: totalAgentCommission, 
+          cpaComm: totalCPACommission 
+        });
 
       } catch (e) {
         console.error(e);
@@ -180,33 +203,27 @@ export default function AdminDashboard() {
       {/* Header */}
       <div>
          <h1 className="text-2xl font-semibold leading-9 text-[#111111]">Dashboard</h1>
-         <p className="text-base text-[#9499A1]">Overview of platform performance, revenue, and payouts</p>
+         <p className="text-base text-[#9499A1]">Overview of platform performance and revenue</p>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <StatCard 
-            title="Total Revenue Generated" 
+            title="Total Revenue" 
             value={formatCurrency(data.totalRev)} 
             description="Total revenue generated from subscriptions"
             icon={DollarSign}
         />
         <StatCard 
-            title="Total Commission" 
+            title="Total Commission Payable" 
             value={formatCurrency(data.totalComm)} 
-            description="Commission payable to all partners"
+            description={`Agents: ${formatCurrency(data.agentComm)} + CPAs: ${formatCurrency(data.cpaComm)}`}
             icon={Percent}
-        />
-        <StatCard 
-            title="Pending Withdrawals" 
-            value={formatCurrency(data.totalPending)} 
-            description="Withdrawal requests awaiting approval"
-            icon={Wallet}
         />
         <StatCard 
             title="Active Subscriptions" 
             value={data.activeUsers.toLocaleString()} 
-            description="Subscriptions currently active via CPA"
+            description="Currently active subscriptions"
             icon={Users}
         />
       </div>

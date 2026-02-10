@@ -1,10 +1,23 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { collection, query, where, onSnapshot, doc } from "firebase/firestore";
+import { collection, query, where, onSnapshot, doc, getDocs } from "firebase/firestore";
 import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
 import { Loader2, ChevronDown } from "../../components/Icons";
 import toast, { Toaster } from "react-hot-toast";
 import {RevenueIcon, SubscriptionIcon, CalendarIconLarge, EmptyPerformanceIllustration as EmptyIllustration } from "../../components/Icons";
+
+// Pricing lookup
+const PLAN_PRICES = {
+  'writeoffgenie-premium-month': 25.00,
+  'com.writeoffgenie.premium.monthly': 25.00,
+  'writeoffgenie-pro-month': 15.00,
+  'com.writeoffgenie.pro.monthly': 15.00,
+  'writeoffgenie-premium-year': 239.99,
+  'com.writeoffgenie.premium.yearly': 239.99,
+  'writeoffgenie-pro-year': 143.99,
+  'com.writeoffgenie.pro.yearly': 143.99,
+};
+const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
 
 // --- STAT CARD ---
 const StatCard = ({ icon: Icon, label, value, description }) => (
@@ -33,33 +46,78 @@ export default function Performance() {
   useEffect(() => {
     if (!user) return;
 
-    // Get partner's commission rate
-    const unsubProfile = onSnapshot(doc(db, "Partners", user.uid), (docSnap) => {
-      if (docSnap.exists()) {
-        setCommissionRate(docSnap.data().commissionRate || 10);
-      }
-    });
+    let unsubProfile = null;
 
-    const q = query(collection(db, "Clients"), where("referredBy", "==", user.uid));
-    const unsubClients = onSnapshot(q, (snap) => {
-      setClients(snap.docs.map(d => {
-        const data = d.data();
-        return {
-          id: d.id,
-          email: data.email,
-          name: data.name,
-          planType: data.subscription?.planType || "Free Plan",
-          amountPaid: data.subscription?.amountPaid || 0,
-          activatedAt: data.subscription?.activatedAt?.toDate() || data.createdAt?.toDate() || new Date(),
-          subscriptionStatus: data.subscription?.status || "inactive"
-        };
-      }));
-      setLoading(false);
-    });
+    const fetchData = async () => {
+      // Get partner's commission rate and referral code
+      unsubProfile = onSnapshot(doc(db, "Partners", user.uid), async (docSnap) => {
+        if (docSnap.exists()) {
+          const partnerData = docSnap.data();
+          setCommissionRate(partnerData.commissionRate || 10);
+          
+          // Fetch users with this CPA's referral code
+          const cpaReferralCode = partnerData.referralCode;
+          if (!cpaReferralCode) {
+            setClients([]);
+            setLoading(false);
+            return;
+          }
+
+          try {
+            const now = new Date();
+            const q = query(collection(db, "user"), where("referral_code", "==", cpaReferralCode));
+            const querySnapshot = await getDocs(q);
+            const subscriptionData = [];
+
+            for (const userDoc of querySnapshot.docs) {
+              const userId = userDoc.id;
+              const userData = userDoc.data();
+
+              // Fetch all subscriptions for this user
+              const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
+
+              for (const subDoc of subsSnap.docs) {
+                const subData = subDoc.data();
+                const price = getPlanPrice(subData.planname);
+                
+                // Parse dates
+                let purchaseDate = subData.purchase_date || subData.purchse_date || subData.created_Time;
+                if (purchaseDate?.toDate) purchaseDate = purchaseDate.toDate();
+                else if (typeof purchaseDate === 'string') purchaseDate = new Date(purchaseDate);
+                else purchaseDate = new Date();
+
+                let expirationDate = subData.expiration_date;
+                if (expirationDate?.toDate) expirationDate = expirationDate.toDate();
+                else if (typeof expirationDate === 'string') expirationDate = new Date(expirationDate);
+
+                const isActive = subData.status === 'active' && expirationDate && expirationDate > now;
+
+                subscriptionData.push({
+                  id: subDoc.id,
+                  email: userData.email || '',
+                  name: userData.display_name || userData.name || 'Unknown',
+                  planType: subData.planname?.replace('writeoffgenie-', '').replace('com.writeoffgenie.', '').replace('.monthly', '').replace('.yearly', '') || 'Unknown',
+                  amountPaid: price,
+                  activatedAt: purchaseDate,
+                  subscriptionStatus: isActive ? 'active' : 'inactive'
+                });
+              }
+            }
+
+            setClients(subscriptionData);
+          } catch (error) {
+            console.error("Error fetching performance data:", error);
+          }
+          
+          setLoading(false);
+        }
+      });
+    };
+
+    fetchData();
 
     return () => {
-      unsubProfile();
-      unsubClients();
+      if (unsubProfile) unsubProfile();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);

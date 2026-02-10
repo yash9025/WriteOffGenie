@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import Loader from "../components/Loader";
 import Sidebar from "../components/navigation/Sidebar";
 import { 
-  LayoutDashboard, Users, DollarSign, Wallet, 
+  LayoutDashboard, Users, DollarSign,
   User, UserPlus, TrendingUp, Activity, FileText
 } from "lucide-react";
 
@@ -41,7 +41,6 @@ const ProtectedLayout = ({ allowedRoles }) => {
           { icon: UserPlus, label: "Agent Management", path: "/admin/agents", activePaths: ["/admin/agents"] },
           { icon: Users, label: "CPA Management", path: "/admin/cpas", activePaths: ["/admin/cpas"] },
           { icon: TrendingUp, label: "Earnings & Revenue", path: "/admin/earnings" },
-          { icon: Wallet, label: "Withdrawals", path: "/admin/withdrawals" },
         ];
       
       case 'agent':
@@ -49,7 +48,6 @@ const ProtectedLayout = ({ allowedRoles }) => {
           { icon: LayoutDashboard, label: "Dashboard", path: "/agent/dashboard" },
           { icon: Users, label: "CPA Management", path: "/agent/cpas", activePaths: ["/agent/cpas"] },
           { icon: TrendingUp, label: "Earnings", path: "/agent/earnings" },
-          { icon: Wallet, label: "Wallet & Withdrawals", path: "/agent/wallet" },
           { icon: User, label: "Profile", path: "/agent/profile" },
         ];
       
@@ -59,7 +57,6 @@ const ProtectedLayout = ({ allowedRoles }) => {
           { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
           { icon: Users, label: "My Clients", path: "/my-referrals" },
           { icon: Activity, label: "Earnings & Commission", path: "/performance" },
-          { icon: Wallet, label: "Wallet & Withdrawals", path: "/payouts" },
           { icon: User, label: "Profile", path: "/profile" },
         ];
     }

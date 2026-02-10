@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Outlet, Navigate, Link, useLocation, useNavigate } from "react-router-dom";
 import { 
-  LayoutDashboard, Users, Wallet, 
+  LayoutDashboard, Users,
   LogOut, Menu, X, Activity, User, Search
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -44,7 +44,6 @@ function CaSidebarLayout({ children }) {
   const getSearchPlaceholder = () => {
     if (pathname.includes("referrals")) return "Search referrals by name or email...";
     if (pathname.includes("performance")) return "Search by user or plan...";
-    if (pathname.includes("payouts")) return "Search withdrawals...";
     if (pathname.includes("profile")) return "Search settings...";
     return "Search here...";
   };
@@ -53,7 +52,6 @@ function CaSidebarLayout({ children }) {
     { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
     { icon: Users, label: "Referred Users", path: "/my-referrals" },
     { icon: Activity, label: "Earnings & Commission", path: "/performance" },
-    { icon: Wallet, label: "Wallet & Withdrawals", path: "/payouts" },
     { icon: User, label: "Profile", path: "/profile" },
   ];
 

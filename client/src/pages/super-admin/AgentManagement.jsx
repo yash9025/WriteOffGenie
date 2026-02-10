@@ -3,17 +3,17 @@ import { collection, query, where, getDocs, doc, onSnapshot } from "firebase/fir
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
-import { useSearch } from "../../context/SearchContext"; // Keeping context search if used globally
+import { useSearch } from "../../context/SearchContext";
 import { useNavigate } from "react-router-dom";
 import { 
-  Search, Loader2, Ban, CheckCircle2, UserPlus, X, DollarSign, TrendingUp, Wallet, Users, Eye, Activity
+  Search, Loader2, Ban, CheckCircle2, UserPlus, X, DollarSign, TrendingUp, Users, Eye, Activity
 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import StatCard from "../../components/common/StatCard";
 
 export default function AgentManagement() {
   const { user } = useAuth();
-  const { searchQuery } = useSearch(); // Use global search or local filter
+  const { searchQuery } = useSearch();
   const navigate = useNavigate();
   
   // Data States
@@ -25,13 +25,18 @@ export default function AgentManagement() {
   const [stats, setStats] = useState({
     totalRevenue: 0,
     totalAgentCommission: 0,
-    pendingWithdrawals: 0,
-    activeSubscriptions: 0
+    activeSubscriptions: 0,
+    totalNetProfit: 0
   });
 
   // Invite Modal State
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [inviteForm, setInviteForm] = useState({ name: "", email: "" });
+  const [inviteForm, setInviteForm] = useState({ 
+    name: "", 
+    email: "",
+    commissionPercentage: 15,
+    maintenanceCostPerUser: 6.00
+  });
   const [sendingInvite, setSendingInvite] = useState(false);
 
   useEffect(() => {
@@ -56,12 +61,30 @@ export default function AgentManagement() {
       // Sort by created date
       agentsData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
       
-      // Calculate derived stats for each agent
-      let totalActiveClients = 0;
+      // Pricing lookup table
+      const PLAN_PRICES = {
+        'writeoffgenie-premium-month': 25.00,
+        'com.writeoffgenie.premium.monthly': 25.00,
+        'writeoffgenie-pro-month': 15.00,
+        'com.writeoffgenie.pro.monthly': 15.00,
+        'writeoffgenie-premium-year': 239.99,
+        'com.writeoffgenie.premium.yearly': 239.99,
+        'writeoffgenie-pro-year': 143.99,
+        'com.writeoffgenie.pro.yearly': 143.99,
+      };
+      const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
       
-      // Note: For a real production app with thousands of agents, 
-      // these sub-queries should be replaced with aggregated counters in Firestore.
+      // Calculate derived stats for each agent with new formula
+      let totalActiveClients = 0;
+      let totalRevenue = 0;
+      let totalCPACommissions = 0;
+      let totalAgentCommissions = 0;
+      let totalNetProfit = 0;
+      
+      const now = new Date();
+      
       for (const agent of agentsData) {
+        // Get CPAs referred by this agent
         const cpasQuery = query(
           collection(db, "Partners"),
           where("referredBy", "==", agent.id),
@@ -70,40 +93,90 @@ export default function AgentManagement() {
         const cpasSnapshot = await getDocs(cpasQuery);
         agent.cpaCount = cpasSnapshot.size;
 
-        let agentClientCount = 0;
+        // Calculate revenue, CPA commissions, and active clients
+        let agentTotalRevenue = 0;
+        let agentCPACommissions = 0;
+        let agentActiveClients = 0;
+
         for (const cpaDoc of cpasSnapshot.docs) {
-          const clientsQuery = query(
-            collection(db, "Clients"),
-            where("referredBy", "==", cpaDoc.id),
-            where("subscription.status", "==", "active")
+          const cpaData = cpaDoc.data();
+          const cpaCommissionRate = (cpaData.commissionRate || 10) / 100;
+          const cpaReferralCode = cpaData.referralCode;
+
+          if (!cpaReferralCode) continue;
+
+          // Query users who have this CPA's referral code
+          const usersQuery = query(
+            collection(db, "user"),
+            where("referral_code", "==", cpaReferralCode)
           );
-          const clientsSnapshot = await getDocs(clientsQuery);
-          agentClientCount += clientsSnapshot.size;
+          const usersSnapshot = await getDocs(usersQuery);
+          
+          for (const userDoc of usersSnapshot.docs) {
+            const userId = userDoc.id;
+            
+            // Fetch all subscriptions for this user
+            const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
+            
+            let userHasActiveSubscription = false;
+            let userTotalRevenue = 0;
+            
+            for (const subDoc of subsSnap.docs) {
+              const subData = subDoc.data();
+              const price = getPlanPrice(subData.planname);
+              
+              // Add to cumulative revenue (all subscriptions count)
+              userTotalRevenue += price;
+              
+              // Check if this subscription is active
+              const expirationDate = subData.expiration_date?.toDate();
+              if (subData.status === 'active' && expirationDate && expirationDate > now) {
+                userHasActiveSubscription = true;
+              }
+            }
+            
+            // Add user's cumulative revenue
+            agentTotalRevenue += userTotalRevenue;
+            
+            // Calculate CPA commission on total revenue
+            const cpaCommission = userTotalRevenue * cpaCommissionRate;
+            agentCPACommissions += cpaCommission;
+            
+            // Count as active client if they have at least one active subscription
+            if (userHasActiveSubscription) {
+              agentActiveClients++;
+            }
+          }
         }
-        agent.activeClients = agentClientCount;
-        totalActiveClients += agentClientCount;
+
+        // Apply New Formula: Agent_Commission = (Agent_Commission_Rate %) * [(Total_Revenue - Total_CPA_Commissions) - (Active_Subscriptions * Maintenance_Cost)]
+        const agentCommissionRate = (agent.commissionPercentage || 15) / 100;
+        const maintenanceCost = agent.maintenanceCostPerUser || 6.00;
+        
+        const netRevenue = agentTotalRevenue - agentCPACommissions;
+        const maintenanceCosts = agentActiveClients * maintenanceCost;
+        const netProfit = netRevenue - maintenanceCosts;
+        const agentCommission = Math.max(0, netProfit * agentCommissionRate); // Floor at 0
+
+        agent.activeClients = agentActiveClients;
+        agent.calculatedEarnings = agentCommission;
+        agent.netProfit = netProfit;
+        agent.totalRevenue = agentTotalRevenue;
+
+        totalActiveClients += agentActiveClients;
+        totalRevenue += agentTotalRevenue;
+        totalCPACommissions += agentCPACommissions;
+        totalAgentCommissions += agentCommission;
+        totalNetProfit += netProfit;
       }
 
       setAgents(agentsData);
 
-      // Calculate overall stats
-      const totalRev = agentsData.reduce((sum, agent) => sum + (agent.stats?.totalRevenue || 0), 0);
-      const totalComm = agentsData.reduce((sum, agent) => sum + (agent.stats?.totalEarnings || 0), 0);
-      
-      // Get pending withdrawals
-      const withdrawalsQuery = query(
-        collection(db, "Payouts"),
-        where("partnerRole", "==", "agent"),
-        where("status", "==", "pending")
-      );
-      const withdrawalsSnapshot = await getDocs(withdrawalsQuery);
-      const pendingAmount = withdrawalsSnapshot.docs.reduce((sum, doc) => sum + (doc.data().amount || 0), 0);
-
       setStats({
-        totalRevenue: totalRev,
-        totalAgentCommission: totalComm,
-        pendingWithdrawals: pendingAmount,
-        activeSubscriptions: totalActiveClients
+        totalRevenue,
+        totalAgentCommission: totalAgentCommissions,
+        activeSubscriptions: totalActiveClients,
+        totalNetProfit
       });
 
       setLoading(false);
@@ -123,6 +196,18 @@ export default function AgentManagement() {
       return;
     }
 
+    // Validate commission percentage
+    if (inviteForm.commissionPercentage < 0 || inviteForm.commissionPercentage > 100) {
+      toast.error("Commission percentage must be between 0 and 100");
+      return;
+    }
+
+    // Validate maintenance cost
+    if (inviteForm.maintenanceCostPerUser < 0) {
+      toast.error("Maintenance cost cannot be negative");
+      return;
+    }
+
     setSendingInvite(true);
     const toastId = toast.loading("Sending invitation...");
 
@@ -131,12 +216,19 @@ export default function AgentManagement() {
       const sendAgentInvite = httpsCallable(functions, 'sendAgentInvite');
       await sendAgentInvite({
         name: inviteForm.name,
-        email: inviteForm.email
+        email: inviteForm.email,
+        commissionPercentage: parseFloat(inviteForm.commissionPercentage),
+        maintenanceCostPerUser: parseFloat(inviteForm.maintenanceCostPerUser)
       });
       
       toast.success("Agent invitation sent!", { id: toastId });
       setShowInviteModal(false);
-      setInviteForm({ name: "", email: "" });
+      setInviteForm({ 
+        name: "", 
+        email: "",
+        commissionPercentage: 15,
+        maintenanceCostPerUser: 6.00
+      });
       fetchAgents(); // Refresh list
     } catch (error) {
       console.error("Error sending invite:", error);
@@ -170,7 +262,7 @@ export default function AgentManagement() {
   };
 
   // --- HELPERS ---
-  const formatCurrency = (value) => `$${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+  const formatCurrency = (value) => `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const formatDate = (timestamp) => {
     if (!timestamp) return "N/A";
     return new Date(timestamp.seconds * 1000).toLocaleDateString('en-US', {
@@ -216,24 +308,24 @@ export default function AgentManagement() {
       {/* --- STATS CARDS --- */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard 
-          title="Revenue by Agents" 
+          title="Total Revenue" 
           value={formatCurrency(stats.totalRevenue)} 
-          subtitle="Total from all agents" 
+          subtitle="From all agents" 
           IconComponent={DollarSign} 
           iconBgColor="bg-[#00C853]"
         />
         <StatCard 
-          title="Agent Commissions" 
-          value={formatCurrency(stats.totalAgentCommission)} 
-          subtitle="Total paid to agents" 
+          title="Net Profit" 
+          value={formatCurrency(stats.totalNetProfit)} 
+          subtitle="After CPA commissions & maintenance" 
           IconComponent={TrendingUp} 
-          iconBgColor="bg-[#00C853]"
+          iconBgColor="bg-[#4D7CFE]"
         />
         <StatCard 
-          title="Pending Withdrawals" 
-          value={formatCurrency(stats.pendingWithdrawals)} 
-          subtitle="Awaiting approval" 
-          IconComponent={Wallet} 
+          title="Agent Commissions" 
+          value={formatCurrency(stats.totalAgentCommission)} 
+          subtitle="Based on net profit" 
+          IconComponent={TrendingUp} 
           iconBgColor="bg-[#00C853]"
         />
         <StatCard 
@@ -257,7 +349,7 @@ export default function AgentManagement() {
             </button>
 
             <h2 className="text-xl font-semibold text-slate-900 mb-1">Invite Agent</h2>
-            <p className="text-sm text-slate-500 mb-6">Send an invitation to join as an Agent</p>
+            <p className="text-sm text-slate-500 mb-6">Send an invitation to join as an Agent with custom commission settings</p>
 
             <form onSubmit={handleSendInvite} className="space-y-4">
               <div>
@@ -284,15 +376,50 @@ export default function AgentManagement() {
                 />
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Commission Rate (%)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    value={inviteForm.commissionPercentage}
+                    onChange={(e) => setInviteForm({ ...inviteForm, commissionPercentage: e.target.value })}
+                    placeholder="15"
+                    className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-lg text-sm focus:outline-none focus:border-[#4D7CFE] transition-colors"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Maintenance Cost ($)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={inviteForm.maintenanceCostPerUser}
+                    onChange={(e) => setInviteForm({ ...inviteForm, maintenanceCostPerUser: e.target.value })}
+                    placeholder="6.00"
+                    className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-lg text-sm focus:outline-none focus:border-[#4D7CFE] transition-colors"
+                    required
+                  />
+                </div>
+              </div>
+
               <div className="bg-[#F7F9FC] p-4 rounded-xl border border-[#E3E6EA]">
                 <div className="flex items-start gap-3">
                   <div className="p-2 bg-[#4D7CFE1A] rounded-lg">
                     <TrendingUp className="text-[#4D7CFE]" size={20} />
                   </div>
                   <div className="flex-1">
-                    <p className="text-sm text-[#111111] font-semibold mb-1">Fixed Commission</p>
-                    <p className="text-xs text-[#9499A1]">
-                      Agents earn a fixed <span className="font-bold text-[#4D7CFE]">10% commission</span> on all revenue generated by their referred CPAs.
+                    <p className="text-sm text-[#111111] font-semibold mb-1">Net Profit Commission Model</p>
+                    <p className="text-xs text-[#9499A1] leading-relaxed">
+                      Commission = {inviteForm.commissionPercentage}% × [(Revenue - CPA Commissions) - ({formatCurrency(inviteForm.maintenanceCostPerUser)} × Active Users)]
                     </p>
                   </div>
                 </div>
@@ -331,6 +458,7 @@ export default function AgentManagement() {
                 <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Joined Date</th>
                 <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">CPAs Referred</th>
                 <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Active Clients</th>
+                <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Commission Rate</th>
                 <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Total Earnings</th>
                 <th className="py-5 px-6 text-xs font-medium text-[#9499A1] text-center">Status</th>
                 <th className="py-5 px-6 text-xs font-medium text-[#9499A1] text-right">Actions</th>
@@ -374,7 +502,11 @@ export default function AgentManagement() {
                      </td>
 
                      <td className="py-5 px-6">
-                       <span className="text-sm font-bold text-[#111111]">{formatCurrency(agent.stats?.totalEarnings || 0)}</span>
+                       <span className="text-sm font-bold text-[#4D7CFE]">{agent.commissionPercentage || 15}%</span>
+                     </td>
+
+                     <td className="py-5 px-6">
+                       <span className="text-sm font-bold text-[#111111]">{formatCurrency(agent.calculatedEarnings || 0)}</span>
                      </td>
 
                      <td className="py-5 px-6 text-center">

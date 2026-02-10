@@ -7,7 +7,7 @@ import { db } from "../../services/firebase";
 import { getFunctions, httpsCallable } from "firebase/functions"; 
 import { useAuth } from "../../context/AuthContext";
 import { useSearch } from "../../context/SearchContext";
-import { RevenueIcon, WithdrawalIcon, SubscriptionIcon, UsersIconLarge } from "../../components/Icons";
+import { RevenueIcon, SubscriptionIcon, UsersIconLarge, TrendingUp } from "../../components/Icons";
 
 // --- STAT CARD ---
 const StatCard = ({ title, value, description, icon: Icon, isLoading }) => (
@@ -45,29 +45,100 @@ function Dashboard() {
     if (authLoading || !user) return;
 
     // Real-time listener for Partner Profile (Stats & Balance)
-    const unsubProfile = onSnapshot(doc(db, "Partners", user.uid), (docSnap) => {
+    const unsubProfile = onSnapshot(doc(db, "Partners", user.uid), async (docSnap) => {
       if (docSnap.exists()) {
           setProfile(docSnap.data());
+          
+          // Fetch referrals when profile loads
+          await fetchReferrals(docSnap.data().referralCode);
       }
       setDataLoading(false);
     });
 
-    // Fetch list of Referred Clients
-    const fetchReferrals = async () => {
+    // Fetch list of Referred Users from user collection
+    const fetchReferrals = async (cpaReferralCode) => {
       try {
-        const q = query(collection(db, "Clients"), where("referredBy", "==", user.uid));
+        if (!cpaReferralCode) {
+          setReferrals([]);
+          return;
+        }
+        
+        // Pricing lookup
+        const PLAN_PRICES = {
+          'writeoffgenie-premium-month': 25.00,
+          'com.writeoffgenie.premium.monthly': 25.00,
+          'writeoffgenie-pro-month': 15.00,
+          'com.writeoffgenie.pro.monthly': 15.00,
+          'writeoffgenie-premium-year': 239.99,
+          'com.writeoffgenie.premium.yearly': 239.99,
+          'writeoffgenie-pro-year': 143.99,
+          'com.writeoffgenie.pro.yearly': 143.99,
+        };
+        const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
+        const now = new Date();
+        
+        // Get users with this CPA's referral code
+        const q = query(collection(db, "user"), where("referral_code", "==", cpaReferralCode));
         const querySnapshot = await getDocs(q);
-        const clients = querySnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const usersData = [];
+        
+        for (const userDoc of querySnapshot.docs) {
+          const userId = userDoc.id;
+          const userData = userDoc.data();
+          
+          // Fetch all subscriptions for this user
+          const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
+          
+          let totalRevenue = 0;
+          let isActive = false;
+          const subscriptions = [];
+          
+          for (const subDoc of subsSnap.docs) {
+            const subData = subDoc.data();
+            const price = getPlanPrice(subData.planname);
+            totalRevenue += price;
+            subscriptions.push({ id: subDoc.id, ...subData, price });
+            
+            // Check active status - handle both Timestamp and Date objects
+            let expirationDate = subData.expiration_date;
+            if (expirationDate?.toDate) {
+              expirationDate = expirationDate.toDate();
+            } else if (typeof expirationDate === 'string') {
+              expirationDate = new Date(expirationDate);
+            }
+            
+            if (subData.status === 'active' && expirationDate && expirationDate > now) {
+              isActive = true;
+            }
+          }
+          
+          usersData.push({
+            id: userId,
+            name: userData.display_name || userData.name || 'Unknown',
+            email: userData.email || '',
+            phone: userData.phone || '',
+            referralCode: userData.referral_code || '',
+            subscriptions,
+            totalRevenue,
+            subscription: { status: isActive ? 'active' : 'inactive' },
+            createdAt: userData.created_time,
+            rawData: userData
+          });
+        }
+        
         // Sort by newest first
-        clients.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-        setReferrals(clients);
+        usersData.sort((a, b) => {
+          const aTime = a.createdAt?.seconds || a.createdAt?.getTime?.() || 0;
+          const bTime = b.createdAt?.seconds || b.createdAt?.getTime?.() || 0;
+          return bTime - aTime;
+        });
+        
+        setReferrals(usersData);
       } catch (err) { 
         console.error("Error fetching referrals:", err);
-        // Don't block UI on this error, just log it
       }
     };
 
-    fetchReferrals();
     return () => unsubProfile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, authLoading]);
@@ -171,7 +242,7 @@ function Dashboard() {
       {/* KPI Cards Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard title="Total Earnings" value={`$${(profile?.stats?.totalEarnings || 0).toLocaleString()}`} description="Amount earned from subscriptions" icon={RevenueIcon} isLoading={dataLoading} />
-        <StatCard title="Available Balance" value={`$${(profile?.walletBalance || 0).toLocaleString()}`} description="Funds available for withdrawal" icon={WithdrawalIcon} isLoading={dataLoading} />
+        <StatCard title="Commission Rate" value={`${profile?.commissionRate || 10}%`} description="Your earnings percentage" icon={TrendingUp} isLoading={dataLoading} />
         <StatCard title="Users Referred" value={totalReferred} description="Total signups via your link" icon={UsersIconLarge} isLoading={dataLoading} />
         <StatCard title="Active Subscriptions" value={totalSubscribed} description="Users with active paid plans" icon={SubscriptionIcon} isLoading={dataLoading} />
       </div>
@@ -267,10 +338,11 @@ function Dashboard() {
         <div className="flex flex-col gap-3">
           {filteredReferrals.length > 0 ? (
             filteredReferrals.slice(0, 5).map((client) => {
-              const hasSubscription = client.subscription?.planType && client.subscription?.status === "active";
-              const planName = hasSubscription ? client.subscription.planType : "Free";
+              const isActive = client.subscription?.status === "active";
+              const latestSub = client.subscriptions?.[0];
+              const planName = latestSub?.planname?.replace('writeoffgenie-', '').replace('com.writeoffgenie.', '').replace('.monthly', '').replace('.yearly', '') || "Free";
               const commissionRate = (profile?.commissionRate || 10) / 100;
-              const commission = ((client.subscription?.amountPaid || 0) * commissionRate).toFixed(2);
+              const commission = (client.totalRevenue * commissionRate).toFixed(2);
               
               return (
                 <div key={client.id} className="flex flex-col md:flex-row md:items-center justify-between p-3 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-[#E3E6EA]">
@@ -285,8 +357,8 @@ function Dashboard() {
                   </p>
                   
                   <div className="w-full md:w-1/6 text-left md:text-center mb-2 md:mb-0">
-                    <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide border ${hasSubscription ? 'bg-[#ECFDF5] text-[#059669] border-[#A7F3D0]' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
-                      {hasSubscription ? 'Active' : 'Free'}
+                    <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold uppercase tracking-wide border ${isActive ? 'bg-[#ECFDF5] text-[#059669] border-[#A7F3D0]' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+                      {isActive ? 'Active' : 'Free'}
                     </span>
                   </div>
                   

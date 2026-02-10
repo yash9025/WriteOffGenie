@@ -4,13 +4,11 @@ import {
   query,
   where,
   getDocs,
-  doc,
-  onSnapshot,
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
-import { Loader2, TrendingUp, Wallet, Users, DollarSign } from "../../components/Icons";
+import { Loader2, TrendingUp, Users, DollarSign, Activity } from "../../components/Icons";
 import toast, { Toaster } from "react-hot-toast";
 import StatCard from "../../components/common/StatCard";
 import {
@@ -53,14 +51,31 @@ const CustomTooltip = ({ active, payload, label }) => {
   return null;
 };
 
+// Plan prices for revenue calculation (outside component to avoid dependency issues)
+const PLAN_PRICES = {
+  'writeoffgenie-premium-month': 25.00,
+  'com.writeoffgenie.premium.monthly': 25.00,
+  'writeoffgenie-pro-month': 15.00,
+  'com.writeoffgenie.pro.monthly': 15.00,
+  'writeoffgenie-premium-year': 239.99,
+  'com.writeoffgenie.premium.yearly': 239.99,
+  'writeoffgenie-pro-year': 143.99,
+  'com.writeoffgenie.pro.yearly': 143.99,
+};
+const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
+
 const Dashboard = () => {
   const { user, partnerData } = useAuth();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     totalEarnings: 0,
-    availableBalance: 0,
+    commissionRate: 15,
+    maintenanceCost: 6.00,
     totalCPAs: 0,
     activeCPAs: 0,
+    totalRevenue: 0,
+    totalCPACommission: 0,
+    activeSubscriptions: 0,
   });
   const [chartData, setChartData] = useState([]);
   const [inviteForm, setInviteForm] = useState({
@@ -73,99 +88,124 @@ const Dashboard = () => {
   useEffect(() => {
     if (!user) return;
 
-    // 1. Listen to real-time agent stats
-    const unsubscribe = onSnapshot(doc(db, "Partners", user.uid), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setStats((prev) => ({
-          ...prev,
-          totalEarnings: data.stats?.totalEarnings || 0,
-          availableBalance: data.walletBalance || 0,
-        }));
-      }
-    });
-
-    // 2. Load Chart Data & CPAs
+    // Load all data and calculate earnings using formula
     const loadData = async () => {
       try {
-        // A. Get CPAs referred by this agent
+        // 1. Get agent data for commission settings
+        const agentDocSnap = await getDocs(query(collection(db, "Partners"), where("__name__", "==", user.uid)));
+        const agentData = agentDocSnap.docs[0]?.data() || {};
+        const agentCommissionRate = (agentData.commissionPercentage || 15) / 100;
+        const maintenanceCostPerUser = agentData.maintenanceCostPerUser || 6.00;
+
+        // 2. Get CPAs referred by this agent
         const cpasQuery = query(
           collection(db, "Partners"),
           where("referredBy", "==", user.uid),
           where("role", "==", "cpa")
         );
-
         const cpasSnapshot = await getDocs(cpasQuery);
-        const cpaIds = cpasSnapshot.docs.map((doc) => doc.id);
-
-        // B. Count active CPAs
+        
+        // 3. Calculate revenue, CPA commissions, and active subscriptions
+        let totalRevenue = 0;
+        let totalCPACommissions = 0;
+        let activeSubscriptionsCount = 0;
         let activeCPAsCount = 0;
-        if (cpaIds.length > 0) {
-          for (const cpaId of cpaIds) {
-            const cpaDocSnap = await getDocs(
-              query(collection(db, "Partners"), where("__name__", "==", cpaId))
-            );
-            const cpaData = cpaDocSnap.docs[0]?.data();
-            if ((cpaData?.stats?.totalSubscribed || 0) > 0) {
-              activeCPAsCount++;
+        const now = new Date();
+
+        // Monthly data for chart
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const currentYear = now.getFullYear();
+        const currentYearData = monthNames.map((month, i) => ({
+          month,
+          year: currentYear,
+          monthIndex: i,
+          revenue: 0,
+          agentCommission: 0,
+          cpaCommission: 0,
+        }));
+
+        for (const cpaDoc of cpasSnapshot.docs) {
+          const cpaData = cpaDoc.data();
+          const cpaReferralCode = cpaData.referralCode;
+          const cpaRate = (cpaData.commissionRate || 10) / 100;
+          
+          if (!cpaReferralCode) continue;
+          
+          // Get users with this CPA's referral code
+          const usersQuery = query(
+            collection(db, "user"),
+            where("referral_code", "==", cpaReferralCode)
+          );
+          const usersSnapshot = await getDocs(usersQuery);
+          
+          let cpaHasActiveUser = false;
+          
+          for (const userDoc of usersSnapshot.docs) {
+            const userId = userDoc.id;
+            
+            // Fetch subscriptions for this user
+            const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
+            
+            for (const subDoc of subsSnap.docs) {
+              const subData = subDoc.data();
+              const price = getPlanPrice(subData.planname);
+              
+              if (price === 0) continue;
+              
+              totalRevenue += price;
+              const cpaComm = price * cpaRate;
+              totalCPACommissions += cpaComm;
+              
+              // Check if active subscription
+              const expirationDate = subData.expiration_date?.toDate?.() || subData.expiration_date;
+              const isActive = subData.status === 'active' && expirationDate && new Date(expirationDate) > now;
+              
+              if (isActive) {
+                activeSubscriptionsCount++;
+                cpaHasActiveUser = true;
+              }
+              
+              // Add to monthly chart data
+              const purchaseDate = subData.purchase_date?.toDate?.() || subData.purchse_date?.toDate?.() || subData.created_Time?.toDate?.();
+              if (purchaseDate && purchaseDate.getFullYear() === currentYear) {
+                const monthIndex = purchaseDate.getMonth();
+                currentYearData[monthIndex].revenue += price;
+                currentYearData[monthIndex].cpaCommission += cpaComm;
+              }
             }
           }
+          
+          if (cpaHasActiveUser) activeCPAsCount++;
         }
 
-        setStats((prev) => ({
-          ...prev,
-          totalCPAs: cpaIds.length,
-          activeCPAs: activeCPAsCount,
-        }));
+        // 4. Apply formula: Agent_Commission = Rate% × [(Revenue - CPA_Commissions) - (Active_Subs × Maintenance_Cost)]
+        const netRevenue = totalRevenue - totalCPACommissions;
+        const maintenanceCosts = activeSubscriptionsCount * maintenanceCostPerUser;
+        const netProfit = netRevenue - maintenanceCosts;
+        const calculatedEarnings = Math.max(0, netProfit * agentCommissionRate);
 
-        // C. Fetch transactions
-        const transactionsQuery = query(
-          collection(db, "Transactions"),
-          where("agentId", "==", user.uid)
-        );
-        const transactionsSnapshot = await getDocs(transactionsQuery);
-        const transactions = transactionsSnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-
-        // D. CURRENT YEAR LOGIC (Jan - Dec)
-        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        const currentYearData = [];
-        const now = new Date();
-        const currentYear = now.getFullYear();
-
-        // Initialize all 12 months for current year
-        for (let i = 0; i < 12; i++) {
-          currentYearData.push({
-            month: monthNames[i],
-            year: currentYear,
-            monthIndex: i,
-            revenue: 0,
-            agentCommission: 0,
-            cpaCommission: 0,
-          });
-        }
-
-        // Aggregate transactions
-        transactions.forEach((transaction) => {
-          if (transaction.createdAt) {
-            const txDate = transaction.createdAt.toDate
-              ? transaction.createdAt.toDate()
-              : new Date(transaction.createdAt);
-            
-            // Only add if it belongs to this year
-            if (txDate.getFullYear() === currentYear) {
-               const monthIndex = txDate.getMonth(); // 0 = Jan, 11 = Dec
-               if (currentYearData[monthIndex]) {
-                  currentYearData[monthIndex].revenue += transaction.amount || 0;
-                  currentYearData[monthIndex].agentCommission += transaction.agentCommission || 0;
-                  currentYearData[monthIndex].cpaCommission += transaction.cpaCommission || 0;
-               }
-            }
+        // Update chart with agent commission
+        currentYearData.forEach(month => {
+          if (month.revenue > 0) {
+            const monthNet = month.revenue - month.cpaCommission;
+            // Proportional maintenance and commission for the month
+            const monthRatio = month.revenue / (totalRevenue || 1);
+            const monthMaintenance = maintenanceCosts * monthRatio;
+            month.agentCommission = Math.max(0, (monthNet - monthMaintenance) * agentCommissionRate);
           }
         });
 
+        setStats({
+          totalEarnings: calculatedEarnings,
+          commissionRate: agentData.commissionPercentage || 15,
+          maintenanceCost: maintenanceCostPerUser,
+          totalCPAs: cpasSnapshot.size,
+          activeCPAs: activeCPAsCount,
+          totalRevenue,
+          totalCPACommission: totalCPACommissions,
+          activeSubscriptions: activeSubscriptionsCount,
+        });
+        
         setChartData(currentYearData);
         setLoading(false);
       } catch (error) {
@@ -176,7 +216,7 @@ const Dashboard = () => {
     };
 
     loadData();
-    return () => unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
 
   const handleSendInvite = async () => {
@@ -238,14 +278,14 @@ const Dashboard = () => {
         <StatCard
           title="Total Earnings"
           value={formatCurrency(stats.totalEarnings)}
-          description="All-time commission earned"
+          description={`${stats.commissionRate}% × (Net Revenue - $${stats.maintenanceCost}/user)`}
           icon={DollarSign}
         />
         <StatCard
-          title="Available Balance"
-          value={formatCurrency(stats.availableBalance)}
-          description="Ready for withdrawal"
-          icon={Wallet}
+          title="Commission Rate"
+          value={`${stats.commissionRate}%`}
+          description="Your commission percentage"
+          icon={TrendingUp}
         />
         <StatCard
           title="Total CPAs"
@@ -256,7 +296,7 @@ const Dashboard = () => {
         <StatCard
           title="Active CPAs"
           value={stats.activeCPAs}
-          description="With active subscriptions"
+          description={`${stats.activeSubscriptions} active subscriptions`}
           icon={TrendingUp}
         />
       </div>

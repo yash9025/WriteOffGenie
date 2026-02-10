@@ -19,9 +19,9 @@ export const sendReferralInvite = onCall({ cors: true }, async (request) => {
     }
 
     // 4. CONSTRUCT THE CORRECT LINK (The "Bridge" Link)
-    // This ensures the user always lands on your /join page first
-    // ⚠️ REPLACE 'https://writeoffgenie.ai' with your real domain if different
-    const bridgeUrl = `https://write-off-genie.vercel.app/join?ref=${referralCode}`;
+    // This ensures the user always lands on your deep link page first
+    // ⚠️ Updated to use the new Vercel deployment domain
+    const bridgeUrl = `https://writeoffgenie-link.vercel.app/?ref=${referralCode}`;
 
     try {
         const msg = {

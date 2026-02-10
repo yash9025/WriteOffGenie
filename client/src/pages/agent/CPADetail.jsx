@@ -7,8 +7,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../services/firebase";
 import toast, { Toaster } from "react-hot-toast";
 import { 
-  Loader2, User, ChevronDown, ChevronUp, CreditCard, 
-  Building2, Wallet, Clock, CheckCircle2, XCircle, AlertCircle,
+  Loader2, User, ChevronDown, ChevronUp,
   ShieldCheck, Ban, ArrowLeft
 } from "lucide-react";
 
@@ -17,8 +16,11 @@ const ReferralItem = ({ client }) => {
   const [isOpen, setIsOpen] = useState(false);
   
   // Format dates securely
-  const joinedDate = client.createdAt?.toDate ? client.createdAt.toDate() : new Date();
-  const subDate = client.subscription?.activatedAt?.toDate ? client.subscription.activatedAt.toDate() : null;
+  const joinedDate = client.createdAt?.toDate ? client.createdAt.toDate() : 
+    (client.createdAt instanceof Date ? client.createdAt : new Date());
+  const latestSub = client.subscriptions?.[0];
+  const subDate = latestSub?.purchase_date?.toDate ? latestSub.purchase_date.toDate() : 
+    (typeof latestSub?.purchase_date === 'string' ? new Date(latestSub.purchase_date) : null);
   
   return (
     <div className="border-b border-slate-100 last:border-0">
@@ -28,10 +30,10 @@ const ReferralItem = ({ client }) => {
       >
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center text-xs font-bold group-hover:bg-indigo-100 transition-colors">
-            {client.name?.charAt(0) || "C"}
+            {client.name?.charAt(0) || "U"}
           </div>
           <div className="text-left">
-            <p className="text-sm font-bold text-slate-900">{client.name || "Unknown Client"}</p>
+            <p className="text-sm font-bold text-slate-900">{client.name || "Unknown User"}</p>
             <p className="text-[10px] text-slate-400 font-mono">#{client.id.slice(0, 6)}</p>
           </div>
         </div>
@@ -67,7 +69,7 @@ const ReferralItem = ({ client }) => {
                    <p className="text-xs font-bold text-emerald-600">Subscription purchased</p>
                    <p className="text-[10px] text-slate-400">{subDate.toLocaleDateString()} • {subDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
                    <p className="text-[10px] font-bold text-slate-900 mt-0.5">
-                      Amount: ${client.subscription?.amountPaid || 0}
+                      Amount: ${client.totalRevenue?.toFixed(2) || '0.00'}
                    </p>
                  </div>
                </div>
@@ -93,8 +95,6 @@ const CPADetail = () => {
 
   const [cpa, setCPA] = useState(null);
   const [clients, setClients] = useState([]);
-  const [bankAccounts, setBankAccounts] = useState([]);
-  const [withdrawals, setWithdrawals] = useState([]);
   const [loading, setLoading] = useState(true);
   
   // Modal & Processing States
@@ -104,10 +104,71 @@ const CPADetail = () => {
   useEffect(() => {
     if (!id) return;
 
+    // Pricing lookup
+    const PLAN_PRICES = {
+      'writeoffgenie-premium-month': 25.00,
+      'com.writeoffgenie.premium.monthly': 25.00,
+      'writeoffgenie-pro-month': 15.00,
+      'com.writeoffgenie.pro.monthly': 15.00,
+      'writeoffgenie-premium-year': 239.99,
+      'com.writeoffgenie.premium.yearly': 239.99,
+      'writeoffgenie-pro-year': 143.99,
+      'com.writeoffgenie.pro.yearly': 143.99,
+    };
+    const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
+
     // 1. Fetch CPA Profile
-    const unsubCPA = onSnapshot(doc(db, "Partners", id), (docSnap) => {
+    const unsubCPA = onSnapshot(doc(db, "Partners", id), async (docSnap) => {
         if (docSnap.exists()) {
-            setCPA({ id: docSnap.id, ...docSnap.data() });
+            const cpaData = { id: docSnap.id, ...docSnap.data() };
+            setCPA(cpaData);
+            
+            // 2. Fetch Users by referral code
+            const cpaReferralCode = cpaData.referralCode;
+            if (cpaReferralCode) {
+              const now = new Date();
+              const usersQuery = query(collection(db, "user"), where("referral_code", "==", cpaReferralCode));
+              const usersSnap = await getDocs(usersQuery);
+              const usersData = [];
+              
+              for (const userDoc of usersSnap.docs) {
+                const userId = userDoc.id;
+                const userData = userDoc.data();
+                
+                // Fetch subscriptions
+                const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
+                let totalRevenue = 0;
+                let isActive = false;
+                const subscriptions = [];
+                
+                for (const subDoc of subsSnap.docs) {
+                  const subData = subDoc.data();
+                  const price = getPlanPrice(subData.planname);
+                  totalRevenue += price;
+                  subscriptions.push({ id: subDoc.id, ...subData, price });
+                  
+                  let expirationDate = subData.expiration_date;
+                  if (expirationDate?.toDate) expirationDate = expirationDate.toDate();
+                  else if (typeof expirationDate === 'string') expirationDate = new Date(expirationDate);
+                  
+                  if (subData.status === 'active' && expirationDate && expirationDate > now) {
+                    isActive = true;
+                  }
+                }
+                
+                usersData.push({
+                  id: userId,
+                  name: userData.display_name || userData.name || 'Unknown',
+                  email: userData.email || '',
+                  subscriptions,
+                  totalRevenue,
+                  isActive,
+                  createdAt: userData.created_time
+                });
+              }
+              
+              setClients(usersData);
+            }
         } else {
             toast.error("CPA not found");
             navigate("/agent/cpas");
@@ -115,41 +176,8 @@ const CPADetail = () => {
         setLoading(false);
     });
 
-    // 2. Fetch Bank Accounts
-    const bankQuery = query(collection(db, "Partners", id, "BankAccounts"));
-    const unsubBanks = onSnapshot(bankQuery, (snapshot) => {
-        const banks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setBankAccounts(banks);
-    }, (error) => {
-        console.log("Agent permission: Bank accounts hidden or empty", error);
-        setBankAccounts([]); 
-    });
-
-    // 3. Fetch Withdrawals
-    const withdrawalsQuery = query(collection(db, "Payouts"), where("partner_id", "==", id));
-    const unsubWithdrawals = onSnapshot(withdrawalsQuery, (snapshot) => {
-        const payoutList = snapshot.docs.map(doc => ({ 
-            id: doc.id, 
-            ...doc.data(),
-            requestedAt: doc.data().requestedAt?.toDate() || new Date(),
-            processedAt: doc.data().processedAt?.toDate() || null
-        }));
-        payoutList.sort((a, b) => b.requestedAt - a.requestedAt);
-        setWithdrawals(payoutList);
-    });
-
-    // 4. Fetch Clients
-    const fetchClients = async () => {
-        const clientsQ = query(collection(db, "Clients"), where("referredBy", "==", id));
-        const clientsSnap = await getDocs(clientsQ);
-        setClients(clientsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-    };
-    fetchClients();
-
     return () => {
         unsubCPA();
-        unsubBanks();
-        unsubWithdrawals();
     };
   }, [id, navigate]);
 
@@ -178,8 +206,7 @@ const CPADetail = () => {
   if (!cpa) return null;
 
   const isActive = cpa?.status === 'active';
-  const subscribedCount = clients.filter(c => c.subscription?.status === 'active').length;
-  const lastWithdrawalDate = withdrawals.length > 0 ? formatDate(withdrawals[0].requestedAt) : "No withdrawals yet";
+  const subscribedCount = clients.filter(c => c.isActive).length;
 
   return (
     <div className="animate-in fade-in duration-300 pb-10 relative">
@@ -261,124 +288,12 @@ const CPADetail = () => {
             {/* CPA Earnings Summary */}
             <div className="mt-8">
               <p className="text-sm font-bold text-slate-400 mb-4">CPA Earnings Overview</p>
-              <div className="grid md:grid-cols-3 gap-4">
+              <div className="grid md:grid-cols-1 gap-4">
                  <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50/50 border-b-4 border-b-emerald-400 hover:bg-slate-50 transition-colors">
                     <p className="text-xs text-slate-400 font-bold mb-2">Total Earned</p>
                     <p className="text-xl font-black text-slate-900">${(cpa.stats?.totalEarnings || 0).toLocaleString()}</p>
                  </div>
-                 <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50/50 border-b-4 border-b-amber-400 hover:bg-slate-50 transition-colors">
-                    <p className="text-xs text-slate-400 font-bold mb-2">Wallet Balance</p>
-                    <p className="text-xl font-black text-slate-900">${(cpa.walletBalance || 0).toLocaleString()}</p>
-                 </div>
-                 <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50/50 border-b-4 border-b-rose-400 hover:bg-slate-50 transition-colors">
-                    <p className="text-xs text-slate-400 font-bold mb-2">Total Withdrawn</p>
-                    <p className="text-xl font-black text-slate-900">${(cpa.stats?.totalWithdrawn || 0).toLocaleString()}</p>
-                 </div>
               </div>
-            </div>
-
-            {/* Bank Details */}
-            <div className="mt-8">
-              <div className="flex items-center justify-between mb-4">
-                 <p className="text-sm font-bold text-slate-400">Linked Bank Accounts</p>
-                 {bankAccounts.length > 1 && <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded-full font-bold">{bankAccounts.length} Accounts</span>}
-              </div>
-              
-              {bankAccounts.length > 0 ? (
-                <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
-                  {bankAccounts.map((bank) => (
-                    <div key={bank.id} className="min-w-[320px] p-6 bg-slate-50 rounded-2xl border border-slate-100 shrink-0 cursor-default hover:shadow-md transition-shadow">
-                      <div className="space-y-4">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-white rounded-lg shadow-sm text-blue-600"><Building2 size={20}/></div>
-                            <div>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Company Name</p>
-                              <p className="text-sm font-bold text-slate-900">{bank.companyName}</p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-white rounded-lg shadow-sm text-purple-600"><Wallet size={20}/></div>
-                            <div>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Routing Number</p>
-                              <p className="text-sm font-mono font-bold text-slate-900">•••••{bank.routingNumber?.slice(-4)}</p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-white rounded-lg shadow-sm text-emerald-600"><CreditCard size={20}/></div>
-                            <div>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Account Number</p>
-                              <p className="text-sm font-mono font-bold text-slate-900">••••••{bank.accountNumber?.slice(-4)}</p>
-                            </div>
-                        </div>
-                      </div>
-                      <div className="pt-4 mt-4 border-t border-slate-200/60 flex items-center gap-2">
-                          <span className="text-xs text-slate-400 font-medium">Account Type:</span>
-                          <span className="text-xs font-bold text-slate-700 uppercase">{bank.accountType || 'Checking'}</span>
-                          {bank.isDefault && <span className="ml-auto text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold uppercase">Default</span>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-6 bg-slate-50 rounded-2xl text-center text-slate-400 text-sm italic border border-dashed border-slate-200">
-                  <AlertCircle size={20} className="mx-auto mb-2 opacity-50"/>
-                  No bank details visible or linked.
-                </div>
-              )}
-            </div>
-
-            {/* Withdrawal Activity */}
-            <div className="mt-8 pt-8 border-t border-slate-100">
-               <div className="flex justify-between items-center mb-4">
-                  <p className="text-sm font-bold text-slate-400">Withdrawal History</p>
-                  <p className="text-xs text-slate-500">Last Withdrawal: <span className="font-bold text-slate-900">{lastWithdrawalDate}</span></p>
-               </div>
-               
-               <div className="bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-100 text-slate-500 uppercase font-bold border-b border-slate-200">
-                        <tr>
-                            <th className="px-6 py-4">Ref ID</th>
-                            <th className="px-6 py-4">Amount</th>
-                            <th className="px-6 py-4">Status</th>
-                            <th className="px-6 py-4">Bank</th>
-                            <th className="px-6 py-4 text-right">Date</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 bg-white">
-                        {withdrawals.map(p => (
-                            <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
-                                <td className="px-6 py-4 font-mono text-slate-500">{p.referenceId || "---"}</td>
-                                <td className="px-6 py-4 font-bold text-slate-900">${p.amount.toLocaleString()}</td>
-                                <td className="px-6 py-4">
-                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${
-                                        p.status === 'paid' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 
-                                        p.status === 'pending' ? 'bg-amber-50 text-amber-600 border-amber-100' : 
-                                        'bg-red-50 text-red-600 border-red-100'
-                                    }`}>
-                                        {p.status === 'paid' && <CheckCircle2 size={10}/>}
-                                        {p.status === 'pending' && <Clock size={10}/>}
-                                        {p.status === 'rejected' && <XCircle size={10}/>}
-                                        {p.status.toUpperCase()}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4 font-medium text-slate-600">
-                                    {p.bankSnapshot?.companyName || 'Bank Account'} 
-                                    <span className="text-slate-400 text-[10px] ml-1">
-                                        (..{p.bankSnapshot?.accountNumber?.slice(-4) || p.bankAccountUsed?.slice(-4)})
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4 text-right text-slate-500">{formatDate(p.requestedAt)}</td>
-                            </tr>
-                        ))}
-                        {withdrawals.length === 0 && (
-                            <tr>
-                                <td colSpan="5" className="px-6 py-8 text-center text-slate-400 italic">No withdrawal history found.</td>
-                            </tr>
-                        )}
-                    </tbody>
-                  </table>
-               </div>
             </div>
 
           </div>

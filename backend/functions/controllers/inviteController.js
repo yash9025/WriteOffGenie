@@ -6,8 +6,14 @@ import admin from "firebase-admin";
 const db = admin.firestore();
 
 // Generate a secure token containing invite data
-const generateInviteToken = (name, email, commissionRate) => {
-  const payload = JSON.stringify({ name, email, commissionRate, timestamp: Date.now() });
+const generateInviteToken = (name, email, commissionRate, maintenanceCostPerUser = null) => {
+  const payload = JSON.stringify({ 
+    name, 
+    email, 
+    commissionRate, 
+    maintenanceCostPerUser,
+    timestamp: Date.now() 
+  });
   const cipher = crypto.createCipheriv(
     'aes-256-cbc',
     crypto.createHash('sha256').update(process.env.INVITE_SECRET || 'writeoffgenie-secret-key-2024').digest(),
@@ -171,11 +177,19 @@ export const sendAgentInvite = onCall({ cors: true }, async (request) => {
   }
 
   // 3. Extract Data
-  const { name, email } = request.data;
+  const { name, email, commissionPercentage = 15, maintenanceCostPerUser = 6.00 } = request.data;
 
   // 4. Validation
   if (!name || !email) {
     throw new HttpsError('invalid-argument', 'Name and email are required.');
+  }
+
+  if (commissionPercentage < 0 || commissionPercentage > 100) {
+    throw new HttpsError('invalid-argument', 'Commission percentage must be between 0 and 100.');
+  }
+
+  if (maintenanceCostPerUser < 0) {
+    throw new HttpsError('invalid-argument', 'Maintenance cost cannot be negative.');
   }
 
   // 5. Check if email is already registered
@@ -188,8 +202,8 @@ export const sendAgentInvite = onCall({ cors: true }, async (request) => {
   const pendingInvite = await db.collection("PendingInvites").where("email", "==", email).get();
   
   try {
-    // 7. Generate token (agents have fixed 10% commission)
-    const inviteToken = generateInviteToken(name, email, 10);
+    // 7. Generate token with commission settings
+    const inviteToken = generateInviteToken(name, email, commissionPercentage, maintenanceCostPerUser);
     const baseUrl = process.env.FUNCTIONS_EMULATOR ? 'http://localhost:5173' : 'https://writeoffgenie.ai';
     const inviteLink = `${baseUrl}/register-agent?token=${inviteToken}`;
 
@@ -202,7 +216,8 @@ export const sendAgentInvite = onCall({ cors: true }, async (request) => {
       inviteType: 'agent',
       name,
       email,
-      commissionRate: 10, // Fixed for agents
+      commissionRate: commissionPercentage,
+      maintenanceCostPerUser: maintenanceCostPerUser,
       invitedBy: request.auth.uid,
       invitedByRole: 'super_admin',
       invitedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -228,7 +243,7 @@ export const sendAgentInvite = onCall({ cors: true }, async (request) => {
           
           <ul style="color: #666; line-height: 1.8;">
             <li>Invite and manage CPAs</li>
-            <li>Earn <strong>10% commission</strong> on all revenue from your CPAs</li>
+            <li>Earn <strong>${commissionPercentage}% commission</strong> on net profit from your network</li>
             <li>Build your own network and grow your earnings</li>
           </ul>
 

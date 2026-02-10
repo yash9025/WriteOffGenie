@@ -1,21 +1,18 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { 
-  doc, getDoc, collection, query, where, getDocs 
+  doc, getDoc, collection, query, where, getDocs, updateDoc
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../services/firebase";
 import toast, { Toaster } from "react-hot-toast";
 import { 
-  Loader2, User, ChevronDown, ChevronUp, CreditCard, 
-  Building2, Wallet, Clock, CheckCircle2, XCircle, AlertCircle,
-  ShieldCheck, Ban, ArrowLeft, Network
+  Loader2, User, ChevronDown, ChevronUp, ShieldCheck, Ban, ArrowLeft, Network, Settings, TrendingUp, DollarSign, Info, X
 } from "lucide-react";
 
 // --- LEVEL 3: CLIENT ITEM (The Leaf) ---
 const ClientItem = ({ client, isLast }) => {
-  const subStatus = client.subscription?.status || 'inactive';
-  const isSubscribed = subStatus === 'active';
+  const isSubscribed = client.isActive || false;
 
   return (
     <div className="relative flex items-center gap-3 p-3 ml-6 hover:bg-slate-50 transition-colors rounded-lg group">
@@ -25,11 +22,12 @@ const ClientItem = ({ client, isLast }) => {
         {isLast && <div className="absolute -left-4 top-0 h-1/2 w-px bg-slate-300 bg-white"></div>}
 
         <div className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-[10px] font-bold border ${isSubscribed ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
-            {client.displayName?.charAt(0) || "U"}
+            {client.display_name?.charAt(0) || client.email?.charAt(0) || "U"}
         </div>
         <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold text-slate-700 truncate">{client.displayName || client.name || "Unknown User"}</p>
+            <p className="text-xs font-bold text-slate-700 truncate">{client.display_name || "Unknown User"}</p>
             <p className="text-[10px] text-slate-400 truncate">{client.email}</p>
+            <p className="text-[10px] font-semibold text-slate-600">Total: ${client.totalRevenue?.toFixed(2) || '0.00'}</p>
         </div>
         <div className="text-right">
             {isSubscribed ? (
@@ -155,15 +153,25 @@ const AgentDetail = () => {
 
   // Data State
   const [agent, setAgent] = useState(null);
-  const [cpas, setCPAs] = useState([]); 
-  const [bankAccounts, setBankAccounts] = useState([]);
-  const [withdrawals, setWithdrawals] = useState([]);
+  const [cpas, setCPAs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [earnings, setEarnings] = useState({
+    totalRevenue: 0,
+    totalCPACommissions: 0,
+    activeClients: 0,
+    netProfit: 0,
+    agentCommission: 0
+  });
   
   // UI State
   const [expandedCPAs, setExpandedCPAs] = useState({});
   const [processing, setProcessing] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState({
+    commissionPercentage: 15,
+    maintenanceCostPerUser: 6.00
+  });
 
   useEffect(() => {
     if (!id) return;
@@ -179,7 +187,21 @@ const AgentDetail = () => {
             }
             setAgent({ id: agentDoc.id, ...agentDoc.data() });
 
-            // 2. Fetch Network Tree (CPAs -> Clients)
+            // Pricing lookup table
+            const PLAN_PRICES = {
+                'writeoffgenie-premium-month': 25.00,
+                'com.writeoffgenie.premium.monthly': 25.00,
+                'writeoffgenie-pro-month': 15.00,
+                'com.writeoffgenie.pro.monthly': 15.00,
+                'writeoffgenie-premium-year': 239.99,
+                'com.writeoffgenie.premium.yearly': 239.99,
+                'writeoffgenie-pro-year': 143.99,
+                'com.writeoffgenie.pro.yearly': 143.99,
+            };
+            const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
+            const now = new Date();
+
+            // 2. Fetch Network Tree (CPAs -> Users with Subscriptions)
             const cpasQuery = query(
                 collection(db, "Partners"),
                 where("referredBy", "==", id),
@@ -188,33 +210,93 @@ const AgentDetail = () => {
             const cpasSnap = await getDocs(cpasQuery);
             
             const cpasData = [];
+            let totalRevenue = 0;
+            let totalCPACommissions = 0;
+            let activeClients = 0;
+
             for (const cpaDoc of cpasSnap.docs) {
                 const cpaData = { id: cpaDoc.id, ...cpaDoc.data() };
+                const cpaCommissionRate = (cpaData.commissionRate || 10) / 100;
+                const cpaReferralCode = cpaData.referralCode;
                 
-                // Get clients for this CPA
-                const clientsQuery = query(collection(db, "Clients"), where("referredBy", "==", cpaDoc.id));
-                const clientsSnap = await getDocs(clientsQuery);
-                cpaData.clients = clientsSnap.docs.map(c => ({ id: c.id, ...c.data() }));
+                if (!cpaReferralCode) {
+                    cpaData.clients = [];
+                    cpasData.push(cpaData);
+                    continue;
+                }
                 
+                // Get users who have this CPA's referral code
+                const usersQuery = query(collection(db, "user"), where("referral_code", "==", cpaReferralCode));
+                const usersSnap = await getDocs(usersQuery);
+                const clientsData = [];
+                
+                for (const userDoc of usersSnap.docs) {
+                    const userId = userDoc.id;
+                    const userData = userDoc.data();
+                    
+                    // Fetch all subscriptions for this user
+                    const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
+                    
+                    let userTotalRevenue = 0;
+                    let userHasActiveSubscription = false;
+                    const subscriptions = [];
+                    
+                    for (const subDoc of subsSnap.docs) {
+                        const subData = subDoc.data();
+                        const price = getPlanPrice(subData.planname);
+                        
+                        // Add to cumulative revenue
+                        userTotalRevenue += price;
+                        subscriptions.push({ ...subData, price });
+                        
+                        // Check if this subscription is active
+                        const expirationDate = subData.expiration_date?.toDate();
+                        if (subData.status === 'active' && expirationDate && expirationDate > now) {
+                            userHasActiveSubscription = true;
+                        }
+                    }
+                    
+                    // Add client with cumulative data
+                    clientsData.push({
+                        id: userId,
+                        ...userData,
+                        subscriptions,
+                        totalRevenue: userTotalRevenue,
+                        isActive: userHasActiveSubscription
+                    });
+                    
+                    // Add to totals
+                    totalRevenue += userTotalRevenue;
+                    const cpaCommission = userTotalRevenue * cpaCommissionRate;
+                    totalCPACommissions += cpaCommission;
+                    
+                    if (userHasActiveSubscription) {
+                        activeClients++;
+                    }
+                }
+                
+                cpaData.clients = clientsData;
                 cpasData.push(cpaData);
             }
             setCPAs(cpasData);
 
-            // 3. Fetch Bank Accounts
-            const bankQuery = query(collection(db, "Partners", id, "BankAccounts"));
-            const bankSnap = await getDocs(bankQuery);
-            setBankAccounts(bankSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            // Calculate agent earnings using new formula
+            const agentData = { id: agentDoc.id, ...agentDoc.data() };
+            const commissionRate = (agentData.commissionPercentage || 15) / 100;
+            const maintenanceCost = agentData.maintenanceCostPerUser || 6.00;
+            
+            const netRevenue = totalRevenue - totalCPACommissions;
+            const maintenanceCosts = activeClients * maintenanceCost;
+            const netProfit = netRevenue - maintenanceCosts;
+            const agentCommission = Math.max(0, netProfit * commissionRate);
 
-            // 4. Fetch Withdrawals
-            const wdQuery = query(collection(db, "Payouts"), where("partner_id", "==", id));
-            const wdSnap = await getDocs(wdQuery);
-            const wdList = wdSnap.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data(),
-                requestedAt: doc.data().requestedAt?.toDate() || new Date()
-            }));
-            wdList.sort((a, b) => b.requestedAt - a.requestedAt);
-            setWithdrawals(wdList);
+            setEarnings({
+              totalRevenue,
+              totalCPACommissions,
+              activeClients,
+              netProfit,
+              agentCommission
+            });
 
             setLoading(false);
         } catch (error) {
@@ -228,6 +310,60 @@ const AgentDetail = () => {
 
   const toggleCPA = (cpaId) => {
     setExpandedCPAs(prev => ({ ...prev, [cpaId]: !prev[cpaId] }));
+  };
+
+  const handleUpdateSettings = async (e) => {
+    e.preventDefault();
+    
+    // Validation
+    if (editForm.commissionPercentage < 0 || editForm.commissionPercentage > 100) {
+      toast.error("Commission percentage must be between 0 and 100");
+      return;
+    }
+    
+    if (editForm.maintenanceCostPerUser < 0) {
+      toast.error("Maintenance cost cannot be negative");
+      return;
+    }
+
+    setProcessing(true);
+    const toastId = toast.loading("Updating settings...");
+
+    try {
+      await updateDoc(doc(db, "Partners", id), {
+        commissionPercentage: parseFloat(editForm.commissionPercentage),
+        maintenanceCostPerUser: parseFloat(editForm.maintenanceCostPerUser)
+      });
+
+      // Update local state
+      setAgent(prev => ({
+        ...prev,
+        commissionPercentage: parseFloat(editForm.commissionPercentage),
+        maintenanceCostPerUser: parseFloat(editForm.maintenanceCostPerUser)
+      }));
+
+      // Recalculate earnings
+      const commissionRate = parseFloat(editForm.commissionPercentage) / 100;
+      const maintenanceCost = parseFloat(editForm.maintenanceCostPerUser);
+      const netRevenue = earnings.totalRevenue - earnings.totalCPACommissions;
+      const maintenanceCosts = earnings.activeClients * maintenanceCost;
+      const netProfit = netRevenue - maintenanceCosts;
+      const agentCommission = Math.max(0, netProfit * commissionRate);
+
+      setEarnings(prev => ({
+        ...prev,
+        netProfit,
+        agentCommission
+      }));
+
+      toast.success("Settings updated successfully!", { id: toastId });
+      setShowEditModal(false);
+    } catch (error) {
+      console.error("Error updating settings:", error);
+      toast.error("Failed to update settings", { id: toastId });
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const confirmToggleStatus = async () => {
@@ -250,13 +386,12 @@ const AgentDetail = () => {
     return date ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A';
   };
 
-  const formatCurrency = (val) => `$${(val || 0).toLocaleString()}`;
+  const formatCurrency = (val) => `$${(val || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   if (loading) return <div className="h-[60vh] flex items-center justify-center"><Loader2 className="animate-spin text-slate-400" size={32}/></div>;
   if (!agent) return null;
 
   const isActive = agent.status === 'active';
-  const lastWithdrawalDate = withdrawals.length > 0 ? formatDate(withdrawals[0].requestedAt) : "No withdrawals yet";
 
   return (
     <div className="animate-in fade-in duration-300 pb-10 relative">
@@ -323,140 +458,94 @@ const AgentDetail = () => {
                </div>
             </div>
 
-            {/* Commission Rate (Fixed for Agents) */}
+            {/* Commission Settings (Editable) */}
             <div className="mt-8 pb-8 border-b border-slate-50">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between mb-4">
                 <div>
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Fixed Commission</p>
-                  <div className="flex items-center gap-3">
-                     <p className="text-2xl font-black text-emerald-600">10%</p>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Commission Settings</p>
+                  <div className="flex items-center gap-4 mt-2">
+                     <div>
+                       <p className="text-xs text-slate-500">Commission Rate</p>
+                       <p className="text-2xl font-black text-[#4D7CFE]">{agent.commissionPercentage || 15}%</p>
+                     </div>
+                     <div className="w-px h-12 bg-slate-200"></div>
+                     <div>
+                       <p className="text-xs text-slate-500">Maintenance Cost per User</p>
+                       <p className="text-2xl font-black text-slate-700">{formatCurrency(agent.maintenanceCostPerUser || 6.00)}</p>
+                     </div>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => {
+                    setEditForm({
+                      commissionPercentage: agent.commissionPercentage || 15,
+                      maintenanceCostPerUser: agent.maintenanceCostPerUser || 6.00
+                    });
+                    setShowEditModal(true);
+                  }}
+                  className="px-4 py-2 bg-[#4D7CFE] text-white rounded-lg text-sm font-semibold hover:bg-[#3D6CED] transition-colors flex items-center gap-2 cursor-pointer"
+                >
+                  <Settings size={16} />
+                  Edit Settings
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-2">Edit commission percentage and maintenance cost to calculate agent earnings based on net profit.</p>
+            </div>
+
+            {/* Agent Earnings Summary with Formula Breakdown */}
+            <div className="mt-8">
+              <div className="flex items-center gap-2 mb-4">
+                <p className="text-sm font-bold text-slate-400">Earnings Breakdown</p>
+                <div className="group relative">
+                  <Info size={14} className="text-slate-400 cursor-help" />
+                  <div className="absolute left-0 top-6 w-80 bg-slate-900 text-white text-xs p-3 rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10 shadow-lg">
+                    <p className="font-bold mb-1">Formula:</p>
+                    <p className="text-slate-300">Commission = {agent.commissionPercentage || 15}% × [(Revenue - CPA Commissions) - (Active Clients × {formatCurrency(agent.maintenanceCostPerUser || 6.00)})]</p>
                   </div>
                 </div>
               </div>
-              <p className="text-[11px] text-slate-400 mt-2">Agents earn a fixed 10% commission on revenue generated by their referred CPAs.</p>
-            </div>
-
-            {/* Agent Earnings Summary */}
-            <div className="mt-8">
-              <p className="text-sm font-bold text-slate-400 mb-4">Earnings Overview</p>
-              <div className="grid md:grid-cols-3 gap-4">
-                 <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50/50 border-b-4 border-b-emerald-400 hover:bg-slate-50 transition-colors">
-                    <p className="text-xs text-slate-400 font-bold mb-2">Total Earned</p>
-                    <p className="text-xl font-black text-slate-900">{formatCurrency(agent.stats?.totalEarnings)}</p>
-                 </div>
-                 <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50/50 border-b-4 border-b-amber-400 hover:bg-slate-50 transition-colors">
-                    <p className="text-xs text-slate-400 font-bold mb-2">Wallet Balance</p>
-                    <p className="text-xl font-black text-slate-900">{formatCurrency(agent.walletBalance)}</p>
-                 </div>
-                 <div className="p-5 rounded-2xl border border-slate-100 bg-slate-50/50 border-b-4 border-b-rose-400 hover:bg-slate-50 transition-colors">
-                    <p className="text-xs text-slate-400 font-bold mb-2">Total Withdrawn</p>
-                    <p className="text-xl font-black text-slate-900">{formatCurrency(agent.stats?.totalWithdrawn)}</p>
-                 </div>
-              </div>
-            </div>
-
-            {/* Bank Details */}
-            <div className="mt-8">
-              <div className="flex items-center justify-between mb-4">
-                 <p className="text-sm font-bold text-slate-400">Linked Bank Accounts</p>
-                 {bankAccounts.length > 1 && <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-1 rounded-full font-bold">{bankAccounts.length} Accounts</span>}
-              </div>
               
-              {bankAccounts.length > 0 ? (
-                <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
-                  {bankAccounts.map((bank) => (
-                    <div key={bank.id} className="min-w-[320px] p-6 bg-slate-50 rounded-2xl border border-slate-100 shrink-0 cursor-default hover:shadow-md transition-shadow">
-                      <div className="space-y-4">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-white rounded-lg shadow-sm text-blue-600"><Building2 size={20}/></div>
-                            <div>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Company Name</p>
-                              <p className="text-sm font-bold text-slate-900">{bank.companyName}</p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-white rounded-lg shadow-sm text-purple-600"><Wallet size={20}/></div>
-                            <div>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Routing Number</p>
-                              <p className="text-sm font-mono font-bold text-slate-900">•••••{bank.routingNumber?.slice(-4)}</p>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-white rounded-lg shadow-sm text-emerald-600"><CreditCard size={20}/></div>
-                            <div>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Account Number</p>
-                              <p className="text-sm font-mono font-bold text-slate-900">••••••{bank.accountNumber?.slice(-4)}</p>
-                            </div>
-                        </div>
-                      </div>
-                      <div className="pt-4 mt-4 border-t border-slate-200/60 flex items-center gap-2">
-                          <span className="text-xs text-slate-400 font-medium">Account Type:</span>
-                          <span className="text-xs font-bold text-slate-700 uppercase">{bank.accountType || 'Checking'}</span>
-                          {bank.isDefault && <span className="ml-auto text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold uppercase">Default</span>}
-                      </div>
+              <div className="space-y-3">
+                 <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                    <div className="flex justify-between items-center">
+                      <p className="text-xs text-slate-500 font-medium">Total Revenue</p>
+                      <p className="text-lg font-black text-slate-900">{formatCurrency(earnings.totalRevenue)}</p>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-6 bg-slate-50 rounded-2xl text-center text-slate-400 text-sm italic border border-dashed border-slate-200">
-                  <AlertCircle size={20} className="mx-auto mb-2 opacity-50"/>
-                  No bank details linked yet.
-                </div>
-              )}
-            </div>
+                 </div>
 
-            {/* Withdrawal Activity */}
-            <div className="mt-8 pt-8 border-t border-slate-100">
-               <div className="flex justify-between items-center mb-4">
-                  <p className="text-sm font-bold text-slate-400">Withdrawal History</p>
-                  <p className="text-xs text-slate-500">Last Withdrawal: <span className="font-bold text-slate-900">{lastWithdrawalDate}</span></p>
-               </div>
-               
-               <div className="bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-100 text-slate-500 uppercase font-bold border-b border-slate-200">
-                        <tr>
-                            <th className="px-6 py-4">Ref ID</th>
-                            <th className="px-6 py-4">Amount</th>
-                            <th className="px-6 py-4">Status</th>
-                            <th className="px-6 py-4">Bank</th>
-                            <th className="px-6 py-4 text-right">Date</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 bg-white">
-                        {withdrawals.map(p => (
-                            <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
-                                <td className="px-6 py-4 font-mono text-slate-500">{p.referenceId || "---"}</td>
-                                <td className="px-6 py-4 font-bold text-slate-900">{formatCurrency(p.amount)}</td>
-                                <td className="px-6 py-4">
-                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${
-                                        p.status === 'paid' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 
-                                        p.status === 'pending' ? 'bg-amber-50 text-amber-600 border-amber-100' : 
-                                        'bg-red-50 text-red-600 border-red-100'
-                                    }`}>
-                                        {p.status === 'paid' && <CheckCircle2 size={10}/>}
-                                        {p.status === 'pending' && <Clock size={10}/>}
-                                        {p.status === 'rejected' && <XCircle size={10}/>}
-                                        {p.status.toUpperCase()}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4 font-medium text-slate-600">
-                                    {p.bankSnapshot?.companyName || 'Bank Account'} 
-                                    <span className="text-slate-400 text-[10px] ml-1">
-                                        (..{p.bankSnapshot?.accountNumber?.slice(-4) || p.bankAccountUsed?.slice(-4)})
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4 text-right text-slate-500">{formatDate(p.requestedAt)}</td>
-                            </tr>
-                        ))}
-                        {withdrawals.length === 0 && (
-                            <tr>
-                                <td colSpan="5" className="px-6 py-8 text-center text-slate-400 italic">No withdrawal history found.</td>
-                            </tr>
-                        )}
-                    </tbody>
-                  </table>
-               </div>
+                 <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                    <div className="flex justify-between items-center">
+                      <p className="text-xs text-red-500 font-medium">- CPA Commissions</p>
+                      <p className="text-lg font-black text-red-600">-{formatCurrency(earnings.totalCPACommissions)}</p>
+                    </div>
+                 </div>
+
+                 <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                    <div className="flex justify-between items-center">
+                      <p className="text-xs text-red-500 font-medium">- Maintenance Costs ({earnings.activeClients} × {formatCurrency(agent.maintenanceCostPerUser || 6.00)})</p>
+                      <p className="text-lg font-black text-red-600">-{formatCurrency(earnings.activeClients * (agent.maintenanceCostPerUser || 6.00))}</p>
+                    </div>
+                 </div>
+
+                 <div className="h-px bg-slate-200"></div>
+
+                 <div className="p-4 rounded-xl border-2 border-blue-100 bg-blue-50/50">
+                    <div className="flex justify-between items-center">
+                      <p className="text-xs text-blue-600 font-bold uppercase">= Net Profit</p>
+                      <p className="text-lg font-black text-blue-900">{formatCurrency(earnings.netProfit)}</p>
+                    </div>
+                 </div>
+
+                 <div className="p-5 rounded-xl border-2 border-emerald-200 bg-emerald-50">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <p className="text-xs text-emerald-600 font-bold uppercase">Agent Commission</p>
+                        <p className="text-[10px] text-emerald-600/70 mt-0.5">{agent.commissionPercentage || 15}% of Net Profit</p>
+                      </div>
+                      <p className="text-2xl font-black text-emerald-900">{formatCurrency(earnings.agentCommission)}</p>
+                    </div>
+                 </div>
+              </div>
             </div>
 
           </div>
@@ -523,6 +612,87 @@ const AgentDetail = () => {
                 </div>
 
             </div>
+        </div>
+      )}
+
+      {/* EDIT SETTINGS MODAL */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-100 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Edit Commission Settings</h3>
+                <p className="text-sm text-slate-500 mt-1">Adjust commission rate and maintenance cost</p>
+              </div>
+              <button 
+                onClick={() => setShowEditModal(false)}
+                className="text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateSettings} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Commission Rate (%)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  value={editForm.commissionPercentage}
+                  onChange={(e) => setEditForm({ ...editForm, commissionPercentage: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#4D7CFE] transition-colors"
+                  required
+                />
+                <p className="text-xs text-slate-400 mt-1">Percentage of net profit earned by the agent</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Maintenance Cost per User ($)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={editForm.maintenanceCostPerUser}
+                  onChange={(e) => setEditForm({ ...editForm, maintenanceCostPerUser: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#4D7CFE] transition-colors"
+                  required
+                />
+                <p className="text-xs text-slate-400 mt-1">Cost deducted per active subscription before calculating commission</p>
+              </div>
+
+              <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                <p className="text-xs font-bold text-blue-900 mb-1">Formula Preview</p>
+                <p className="text-xs text-blue-700 leading-relaxed">
+                  Commission = {editForm.commissionPercentage}% × [(Revenue - CPA Commissions) - (Active Clients × ${editForm.maintenanceCostPerUser})]
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
+                  disabled={processing}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={processing}
+                  className="flex-1 px-4 py-2.5 bg-[#4D7CFE] text-white rounded-lg text-sm font-semibold hover:bg-[#3D6CED] transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {processing ? <Loader2 size={16} className="animate-spin" /> : <Settings size={16} />}
+                  {processing ? "Updating..." : "Update Settings"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

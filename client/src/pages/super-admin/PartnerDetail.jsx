@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { 
-  doc, onSnapshot, collection, query, where, getDocs 
+  doc, getDoc, onSnapshot, collection, query, where, getDocs 
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../services/firebase";
@@ -135,11 +135,61 @@ export default function PartnerDetail() {
         setPayouts(payoutList);
     });
 
-    // 4. Clients
+    // 4. Fetch Referred Users (former Clients)
     const fetchClients = async () => {
-        const clientsQ = query(collection(db, "Clients"), where("referredBy", "==", partnerId));
-        const clientsSnap = await getDocs(clientsQ);
-        setClients(clientsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        const partnerDoc = await getDoc(doc(db, "Partners", partnerId));
+        if (!partnerDoc.exists() || !partnerDoc.data().referralCode) {
+          setClients([]);
+          return;
+        }
+        
+        const referralCode = partnerDoc.data().referralCode;
+        const PLAN_PRICES = {
+          'writeoffgenie-premium-month': 25.00,
+          'com.writeoffgenie.premium.monthly': 25.00,
+          'writeoffgenie-pro-month': 15.00,
+          'com.writeoffgenie.pro.monthly': 15.00,
+          'writeoffgenie-premium-year': 239.99,
+          'com.writeoffgenie.premium.yearly': 239.99,
+          'writeoffgenie-pro-year': 143.99,
+          'com.writeoffgenie.pro.yearly': 143.99,
+        };
+        const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
+        const now = new Date();
+        
+        const usersQ = query(collection(db, "user"), where("referral_code", "==", referralCode));
+        const usersSnap = await getDocs(usersQ);
+        const usersData = [];
+        
+        for (const userDoc of usersSnap.docs) {
+          const userId = userDoc.id;
+          const userData = userDoc.data();
+          
+          const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
+          let totalRevenue = 0;
+          let isActive = false;
+          
+          for (const subDoc of subsSnap.docs) {
+            const subData = subDoc.data();
+            const price = getPlanPrice(subData.planname);
+            totalRevenue += price;
+            
+            const expirationDate = subData.expiration_date?.toDate();
+            if (subData.status === 'active' && expirationDate && expirationDate > now) {
+              isActive = true;
+            }
+          }
+          
+          usersData.push({
+            id: userId,
+            ...userData,
+            totalRevenue,
+            subscription: { status: isActive ? 'active' : 'inactive' },
+            createdAt: userData.created_time
+          });
+        }
+        
+        setClients(usersData);
     };
     fetchClients();
 

@@ -268,10 +268,10 @@ export const registerAgent = onCall({ cors: true }, async (request) => {
       referralCode,
       role: "agent",
       status: "active",
-      commissionRate: 10, // Fixed 10% for agents
+      commissionPercentage: inviteData.commissionRate || 15,
+      maintenanceCostPerUser: inviteData.maintenanceCostPerUser || 6.00,
       referredBy: inviteData.invitedBy, // Super admin who invited them
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      walletBalance: 0,
       stats: {
         totalReferred: 0,
         totalEarnings: 0,

@@ -13,14 +13,12 @@ import ProtectedLayout from "./layouts/ProtectedLayout";
 import Login from "./pages/auth/Login";
 import Register from "./pages/auth/Register";
 import RegisterAgent from "./pages/auth/RegisterAgent";
-import ClientRegister from "./pages/customer/ClientRegister";
 import ForgotPassword from "./pages/auth/ForgotPassword";
 
 // Pages - CPA (formerly CA)
 import CaDashboard from "./pages/ca/CaDashboard";
 import Performance from "./pages/ca/Performance";
 import MyReferrals from "./pages/ca/MyReferrals";
-import Payouts from "./pages/ca/Payouts";
 import MyProfile from "./pages/ca/MyProfile";
 
 // Pages - Agent (NEW)
@@ -28,7 +26,6 @@ import AgentDashboard from "./pages/agent/Dashboard";
 import AgentCPAManagement from "./pages/agent/CPAManagement";
 import AgentCPADetail from "./pages/agent/CPADetail";
 import AgentEarnings from "./pages/agent/Earnings";
-import AgentWallet from "./pages/agent/Wallet";
 import AgentProfile from "./pages/agent/Profile";
 
 // Pages - Super Admin (formerly Admin)
@@ -37,8 +34,7 @@ import AgentManagement from "./pages/super-admin/AgentManagement";
 import AgentDetail from "./pages/super-admin/AgentDetail";
 import CAManagement from "./pages/super-admin/CAManagement"; 
 import PartnerDetail from "./pages/super-admin/PartnerDetail";       
-import EarningsTracking from "./pages/super-admin/EarningsTrack";       
-import WithdrawalManagement from "./pages/super-admin/WithdrawalManagement"; 
+import EarningsTracking from "./pages/super-admin/EarningsTrack"; 
 
 function App() {
   return (
@@ -53,7 +49,6 @@ function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/register-agent" element={<RegisterAgent />} />
-              <Route path="/client-register" element={<ClientRegister />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
             </Route>
 
@@ -62,7 +57,6 @@ function App() {
               <Route path="/dashboard" element={<CaDashboard />} />
               <Route path="/performance" element={<Performance />} />
               <Route path="/my-referrals" element={<MyReferrals />} />
-              <Route path="/payouts" element={<Payouts />} />
               <Route path="/profile" element={<MyProfile />} />
             </Route>
 
@@ -72,7 +66,6 @@ function App() {
               <Route path="/agent/cpas" element={<AgentCPAManagement />} />
               <Route path="/agent/cpas/:id" element={<AgentCPADetail />} />
               <Route path="/agent/earnings" element={<AgentEarnings />} />
-              <Route path="/agent/wallet" element={<AgentWallet />} />
               <Route path="/agent/profile" element={<AgentProfile />} />
             </Route>
 
@@ -84,7 +77,6 @@ function App() {
               <Route path="/admin/cpas" element={<CAManagement />} />
               <Route path="/admin/cpas/:id" element={<PartnerDetail />} />
               <Route path="/admin/earnings" element={<EarningsTracking />} />
-              <Route path="/admin/withdrawals" element={<WithdrawalManagement />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/login" replace />} />

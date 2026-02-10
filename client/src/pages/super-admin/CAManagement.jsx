@@ -11,10 +11,23 @@ import StatCard from "../../components/common/StatCard";
 
 export default function CAManagement() {
   const [cpas, setCPAs] = useState([]);
-  const [clients, setClients] = useState([]);
+  const [usersData, setUsersData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(null);
   const [filter, setFilter] = useState("");
+  
+  // Pricing lookup
+  const PLAN_PRICES = {
+    'writeoffgenie-premium-month': 25.00,
+    'com.writeoffgenie.premium.monthly': 25.00,
+    'writeoffgenie-pro-month': 15.00,
+    'com.writeoffgenie.pro.monthly': 15.00,
+    'writeoffgenie-premium-year': 239.99,
+    'com.writeoffgenie.premium.yearly': 239.99,
+    'writeoffgenie-pro-year': 143.99,
+    'com.writeoffgenie.pro.yearly': 143.99,
+  };
+  const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
   
   // Invite Modal State
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -31,6 +44,8 @@ export default function CAManagement() {
     const q = query(collection(db, "Partners"), where("role", "==", "cpa"));
     const unsub = onSnapshot(q, async (snapshot) => {
       const cpaData = [];
+      const allUsersData = [];
+      
       for (const docSnap of snapshot.docs) {
         const data = { id: docSnap.id, ...docSnap.data() };
         
@@ -56,22 +71,61 @@ export default function CAManagement() {
           data.referrerRole = null;
         }
         
+        // Fetch users with this CPA's referral code
+        const cpaReferralCode = data.referralCode;
+        if (cpaReferralCode) {
+          const usersQuery = query(collection(db, "user"), where("referral_code", "==", cpaReferralCode));
+          const usersSnap = await getDocs(usersQuery);
+          
+          let totalRevenue = 0;
+          let activeClients = 0;
+          const now = new Date();
+          
+          for (const userDoc of usersSnap.docs) {
+            const userId = userDoc.id;
+            
+            // Fetch subscriptions
+            const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
+            let userIsActive = false;
+            
+            for (const subDoc of subsSnap.docs) {
+              const subData = subDoc.data();
+              const price = getPlanPrice(subData.planname);
+              totalRevenue += price;
+              
+              let expirationDate = subData.expiration_date;
+              if (expirationDate?.toDate) expirationDate = expirationDate.toDate();
+              else if (typeof expirationDate === 'string') expirationDate = new Date(expirationDate);
+              
+              if (subData.status === 'active' && expirationDate && expirationDate > now) {
+                userIsActive = true;
+              }
+              
+              // Store for stats calculation
+              allUsersData.push({
+                cpaId: data.id,
+                cpaCommissionRate: data.commissionRate || 10,
+                amount: price
+              });
+            }
+            
+            if (userIsActive) activeClients++;
+          }
+          
+          data.calculatedStats = {
+            totalRevenue,
+            activeClients,
+            totalClients: usersSnap.size
+          };
+        }
+        
         cpaData.push(data);
       }
+      
       setCPAs(cpaData);
+      setUsersData(allUsersData);
       setLoading(false);
     });
-
-    // Fetch all clients to calculate stats
-    const fetchClients = async () => {
-      try {
-        const clientsSnap = await getDocs(collection(db, "Clients"));
-        setClients(clientsSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } catch (err) {
-        console.error("Error fetching clients:", err);
-      }
-    };
-    fetchClients();
 
     return () => unsub();
   }, []);
@@ -129,21 +183,16 @@ export default function CAManagement() {
     let totalRevenue = 0;
     let totalCommission = 0;
 
-    clients.forEach(client => {
-      const amount = client.subscription?.amountPaid || 0;
-      const cpa = cpas.find(c => c.id === client.referredBy);
-      
-      if (cpa) {
-        totalRevenue += amount;
-        const commissionRate = (cpa.commissionRate || 10) / 100;
-        totalCommission += amount * commissionRate;
-      }
+    usersData.forEach(item => {
+      totalRevenue += item.amount || 0;
+      const commissionRate = (item.cpaCommissionRate || 10) / 100;
+      totalCommission += (item.amount || 0) * commissionRate;
     });
 
     const netRevenue = totalRevenue - totalCommission;
 
     return { totalRevenue, totalCommission, netRevenue };
-  }, [clients, cpas]);
+  }, [usersData]);
 
   const formatCurrency = (value) => `$${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
 

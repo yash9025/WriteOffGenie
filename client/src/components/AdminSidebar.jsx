@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { 
-  LayoutDashboard, Users, TrendingUp, Wallet, LogOut, Menu, X
+  LayoutDashboard, Users, TrendingUp, LogOut, Menu, X
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import logo from "../assets/logo_writeoffgenie.svg";
@@ -32,7 +32,6 @@ export default function AdminSidebar({ children }) {
     { icon: LayoutDashboard, label: "Dashboard", path: "/admin/dashboard" },
     { icon: Users, label: "CPA Management", path: "/admin/cas" },
     { icon: TrendingUp, label: "Earnings & Revenue", path: "/admin/earnings" },
-    { icon: Wallet, label: "Withdrawals", path: "/admin/withdrawals" },
   ];
 
   const handleLogout = async () => {

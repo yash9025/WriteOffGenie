@@ -10,11 +10,8 @@ if (!admin.apps.length) {
 // 1. Import Logic-Only Controllers
 // These are just functions, so we wrap them in onCall here.
 import { registerCA as registerCALogic } from "./controllers/caController.js";
-import { registerClient as registerClientLogic } from "./controllers/clientController.js";
-import { requestWithdrawal as requestWithdrawalLogic } from "./controllers/payoutController.js";
 import { 
-    toggleCAStatus as toggleCAStatusLogic, 
-    processWithdrawal as processWithdrawalLogic,
+    toggleCAStatus as toggleCAStatusLogic,
     updateCommissionRate as updateCommissionRateLogic
 } from "./controllers/adminController.js";
 
@@ -23,6 +20,9 @@ import {
 export { sendReferralInvite } from "./controllers/emailController.js";
 export { sendCPAInvite, sendAgentInvite, verifyInvite } from "./controllers/inviteController.js";
 export { getAgentStats, getAgentCPAs, processAgentCommission, registerAgent } from "./controllers/agentController.js";
+
+// 3. Export Firestore Triggers (renamed to avoid conflicts)
+export { onSubscriptionCreatedTrigger, onUserCreatedTrigger } from "./triggers/subscriptionTrigger.js";
 
 // Set Max Instances
 setGlobalOptions({ maxInstances: 10 });
@@ -35,25 +35,10 @@ export const registerCA = onCall({ cors: true }, async (request) => {
     return await registerCALogic(data, auth);
 });
 
-export const registerClient = onCall({ cors: true }, async (request) => {
-    const { data, auth } = request;
-    return await registerClientLogic(data, auth);
-});
-
-export const requestWithdrawal = onCall({ cors: true }, async (request) => {
-    const { data, auth } = request;
-    return await requestWithdrawalLogic(data, auth);
-});
-
-
 // --- ADMIN FUNCTIONS ---
 
 export const toggleCAStatus = onCall({ cors: true }, async (request) => {
     return await toggleCAStatusLogic(request.data, request);
-});
-
-export const processWithdrawal = onCall({ cors: true }, async (request) => {
-    return await processWithdrawalLogic(request.data, request);
 });
 
 export const updateCommissionRate = onCall({ cors: true }, async (request) => {

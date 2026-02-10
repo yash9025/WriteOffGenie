@@ -1,36 +1,89 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs, collectionGroup } from "firebase/firestore";
 import { db } from "../../services/firebase";
-import { Loader2, Download, DollarSign, PieChart, Wallet, TrendingUp, Users } from "../../components/Icons";
+import { Loader2, Download, DollarSign, Wallet, TrendingUp } from "../../components/Icons";
 import StatCard from "../../components/common/StatCard";
-import toast, { Toaster } from "react-hot-toast";
+import { Toaster } from "react-hot-toast";
+
+const PLAN_PRICES = {
+  'writeoffgenie-premium-month': 25.00,
+  'com.writeoffgenie.premium.monthly': 25.00,
+  'writeoffgenie-pro-month': 15.00,
+  'com.writeoffgenie.pro.monthly': 15.00,
+  'writeoffgenie-premium-year': 239.99,
+  'com.writeoffgenie.premium.yearly': 239.99,
+  'writeoffgenie-pro-year': 143.99,
+  'com.writeoffgenie.pro.yearly': 143.99,
+};
 
 export default function EarningsTracking() {
-  const [users, setUsers] = useState([]);
+  const [usersWithSubs, setUsersWithSubs] = useState([]);
   const [partners, setPartners] = useState({});
+  const [partnersByCode, setPartnersByCode] = useState({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [uSnap, pSnap] = await Promise.all([
-          getDocs(collection(db, "Clients")),
-          getDocs(collection(db, "Partners"))
+        // 3 PARALLEL QUERIES - Fast for 500+ users
+        const [pSnap, uSnap, allSubsSnap] = await Promise.all([
+          getDocs(collection(db, "Partners")),
+          getDocs(collection(db, "user")),
+          getDocs(collectionGroup(db, "subscription")) // ALL subscriptions in ONE query!
         ]);
-
+        
+        // Build user map
+        const userMap = {};
+        uSnap.docs.forEach(d => {
+          userMap[d.id] = { id: d.id, ...d.data() };
+        });
+        
         const pMap = {};
+        const pByCode = {};
         pSnap.forEach(d => {
           const data = d.data();
-          pMap[d.id] = { 
+          const partner = { 
+            id: d.id,
             name: data.displayName || data.name || "Unknown", 
             code: data.referralCode, 
             role: data.role,
             commissionRate: data.role === 'agent' ? 0.10 : ((data.commissionRate || 10) / 100),
+            commissionPercentage: data.commissionPercentage || 15,
+            maintenanceCostPerUser: data.maintenanceCostPerUser || 6.00,
             referredBy: data.referredBy
           };
+          pMap[d.id] = partner;
+          if (data.referralCode) {
+            pByCode[data.referralCode] = partner;
+          }
         });
         setPartners(pMap);
-        setUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setPartnersByCode(pByCode);
+
+        // Process ALL subscriptions from collection group query
+        const usersData = [];
+        
+        allSubsSnap.docs.forEach(subDoc => {
+          const subData = { id: subDoc.id, ...subDoc.data() };
+          
+          // Get userId from doc path: user/{userId}/subscription/{subId}
+          const pathParts = subDoc.ref.path.split('/');
+          const userId = pathParts[1];
+          const userData = userMap[userId] || { id: userId };
+          
+          const planPrice = PLAN_PRICES[subData.planname] || 0;
+          usersData.push({
+            ...userData,
+            subscription: {
+              ...subData,
+              amountPaid: planPrice,
+              planType: subData.planname
+            },
+            referralCode: userData.referral_code || subData.ref_code
+          });
+        });
+
+        setUsersWithSubs(usersData);
       } catch (e) {
         console.error(e);
       } finally {
@@ -40,16 +93,25 @@ export default function EarningsTracking() {
     fetchData();
   }, []);
 
-  // Calculate Totals (separated by Agent and CPA tiers)
+  // Calculate Totals (separated by Agent and CPA tiers) - ONLY ACTIVE SUBSCRIPTIONS
   const stats = useMemo(() => {
-    let agentRevenue = 0;
-    let agentCommission = 0;
     let cpaRevenue = 0;
     let cpaCommission = 0;
-
-    users.forEach(u => {
+    
+    // Group subscriptions by agent for proper commission calculation
+    const agentStats = {}; // agentId -> { revenue, cpaCommissions, activeSubscriptions }
+    const now = new Date();
+    
+    usersWithSubs.forEach(u => {
+      // Only count ACTIVE subscriptions
+      const expirationDate = u.subscription?.expiration_date?.toDate?.() || u.subscription?.expiration_date;
+      const isActive = u.subscription?.status === 'active' && expirationDate && new Date(expirationDate) > now;
+      
+      if (!isActive) return; // Skip inactive subscriptions
+      
       const amount = u.subscription?.amountPaid || 0;
-      const directCPA = u.referredBy && partners[u.referredBy];
+      const refCode = u.referralCode;
+      const directCPA = refCode ? partnersByCode[refCode] : null;
       
       if (!directCPA) return; // Skip if no referrer
       
@@ -59,18 +121,47 @@ export default function EarningsTracking() {
       cpaRevenue += amount;
       cpaCommission += cpaComm;
       
-      // Agent commission (if CPA was referred by an Agent)
+      // Track per-agent stats (if CPA was referred by an Agent)
       if (directCPA.referredBy && partners[directCPA.referredBy]) {
         const agent = partners[directCPA.referredBy];
         if (agent.role === 'agent') {
-          const agentComm = amount * 0.10; // Agents always get 10%
-          agentRevenue += amount;
-          agentCommission += agentComm;
+          const agentId = directCPA.referredBy;
+          if (!agentStats[agentId]) {
+            agentStats[agentId] = { 
+              revenue: 0, 
+              cpaCommissions: 0, 
+              activeSubscriptions: 0,
+              commissionRate: (agent.commissionPercentage || 15) / 100,
+              maintenanceCost: agent.maintenanceCostPerUser || 6.00
+            };
+          }
+          agentStats[agentId].revenue += amount;
+          agentStats[agentId].cpaCommissions += cpaComm;
+          agentStats[agentId].activeSubscriptions++;
         }
       }
     });
+    
+    // Calculate agent commission using the correct formula per agent
+    let agentRevenue = 0;
+    let agentCommission = 0;
+    
+    Object.values(agentStats).forEach(agent => {
+      agentRevenue += agent.revenue;
+      // Formula: Rate% × [(Revenue - CPA Commissions) - (Active Subs × Maintenance Cost)]
+      const netRevenue = agent.revenue - agent.cpaCommissions;
+      const maintenanceCosts = agent.activeSubscriptions * agent.maintenanceCost;
+      const netProfit = netRevenue - maintenanceCosts;
+      const agentComm = Math.max(0, netProfit * agent.commissionRate);
+      agentCommission += agentComm;
+    });
 
-    const totalRevenue = users.reduce((acc, u) => acc + (u.subscription?.amountPaid || 0), 0);
+    // Count only active subscriptions for total revenue
+    const activeUsers = usersWithSubs.filter(u => {
+      const expirationDate = u.subscription?.expiration_date?.toDate?.() || u.subscription?.expiration_date;
+      return u.subscription?.status === 'active' && expirationDate && new Date(expirationDate) > now;
+    });
+    const totalRevenue = activeUsers.reduce((acc, u) => acc + (u.subscription?.amountPaid || 0), 0);
     const totalCommission = agentCommission + cpaCommission;
     const netRevenue = totalRevenue - totalCommission;
     const netAgentRevenue = agentRevenue - agentCommission;
@@ -87,7 +178,7 @@ export default function EarningsTracking() {
       cpaCommission,
       netCPARevenue
     };
-  }, [users, partners]);
+  }, [usersWithSubs, partners, partnersByCode]);
 
   const formatDate = (timestamp) => {
     if (!timestamp) return "N/A";
@@ -99,9 +190,10 @@ export default function EarningsTracking() {
 
   const downloadCSV = () => {
     const headers = ['Date', 'CPA Name', 'Agent Name', 'User Name', 'User Email', 'Plan', 'Amount', 'CPA Commission', 'Agent Commission', 'Net Revenue', 'Status'];
-    const rows = users.map(u => {
+    const rows = usersWithSubs.map(u => {
       const amount = u.subscription?.amountPaid || 0;
-      const directCPA = u.referredBy && partners[u.referredBy];
+      const refCode = u.referralCode;
+      const directCPA = refCode ? partnersByCode[refCode] : null;
       const cpaName = directCPA ? directCPA.name : "Direct / Organic";
       const cpaComm = directCPA ? (amount * directCPA.commissionRate) : 0;
       
@@ -119,7 +211,7 @@ export default function EarningsTracking() {
       const isCredited = u.subscription?.status === 'active';
       
       return [
-        formatDate(u.createdAt), cpaName, agentName, u.displayName || u.name || 'N/A', u.email || 'N/A',
+        formatDate(u.created_time || u.createdAt), cpaName, agentName, u.display_name || u.displayName || u.name || 'N/A', u.email || 'N/A',
         u.subscription?.planType || 'Free', amount.toFixed(2), cpaComm.toFixed(2), agentComm.toFixed(2),
         net.toFixed(2), isCredited ? 'Credited' : 'Pending'
       ];
@@ -169,13 +261,13 @@ export default function EarningsTracking() {
 
       {/* Stats Grid - 6 Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        <StatCard title="Total Agent Revenue" value={formatCurrency(stats.agentRevenue)} description="Revenue from Agent tier" icon={DollarSign}/>
-        <StatCard title="Total Agent Commission" value={formatCurrency(stats.agentCommission)} description="Commission to Agents (10%)" icon={TrendingUp}/>
-        <StatCard title="Net Agent Revenue" value={formatCurrency(stats.netAgentRevenue)} description="After agent commissions" icon={Wallet}/>
+        <StatCard title="Active Agent Revenue" value={formatCurrency(stats.agentRevenue)} description="Active subscriptions via Agent CPAs" icon={DollarSign}/>
+        <StatCard title="Agent Commission Payable" value={formatCurrency(stats.agentCommission)} description="Rate% × (Net Profit - Maintenance)" icon={TrendingUp}/>
+        <StatCard title="Net Agent Revenue" value={formatCurrency(stats.netAgentRevenue)} description="Platform keeps after agent comm" icon={Wallet}/>
         
-        <StatCard title="Total CPA Revenue" value={formatCurrency(stats.cpaRevenue)} description="Revenue from CPA tier" icon={DollarSign}/>
-        <StatCard title="Total CPA Commission" value={formatCurrency(stats.cpaCommission)} description="Commission to CPAs (10-50%)" icon={TrendingUp}/>
-        <StatCard title="Net CPA Revenue" value={formatCurrency(stats.netCPARevenue)} description="After CPA commissions" icon={Wallet}/>
+        <StatCard title="Active CPA Revenue" value={formatCurrency(stats.cpaRevenue)} description="Active subscriptions via CPAs" icon={DollarSign}/>
+        <StatCard title="CPA Commission Payable" value={formatCurrency(stats.cpaCommission)} description="Sum of all CPA commissions" icon={TrendingUp}/>
+        <StatCard title="Net CPA Revenue" value={formatCurrency(stats.netCPARevenue)} description="Platform keeps after CPA comm" icon={Wallet}/>
       </div>
       <Toaster position="top-right" />
     </div>

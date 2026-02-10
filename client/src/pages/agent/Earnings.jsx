@@ -27,6 +27,25 @@ const Earnings = () => {
 
   const fetchEarningsData = async () => {
     try {
+      // Pricing lookup
+      const PLAN_PRICES = {
+        'writeoffgenie-premium-month': 25.00,
+        'com.writeoffgenie.premium.monthly': 25.00,
+        'writeoffgenie-pro-month': 15.00,
+        'com.writeoffgenie.pro.monthly': 15.00,
+        'writeoffgenie-premium-year': 239.99,
+        'com.writeoffgenie.premium.yearly': 239.99,
+        'writeoffgenie-pro-year': 143.99,
+        'com.writeoffgenie.pro.yearly': 143.99,
+      };
+      const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
+
+      // Get agent data for commission settings
+      const agentDocSnap = await getDocs(query(collection(db, "Partners"), where("__name__", "==", user.uid)));
+      const agentData = agentDocSnap.docs[0]?.data() || {};
+      const agentCommissionRate = (agentData.commissionPercentage || 15) / 100;
+      const maintenanceCostPerUser = agentData.maintenanceCostPerUser || 6.00;
+
       // Get all CPAs referred by this agent
       const cpasQuery = query(
         collection(db, "Partners"),
@@ -35,61 +54,100 @@ const Earnings = () => {
       );
       
       const cpasSnapshot = await getDocs(cpasQuery);
-      const cpaIds = cpasSnapshot.docs.map(doc => doc.id);
       const cpasMap = {};
       cpasSnapshot.docs.forEach(doc => {
-        cpasMap[doc.id] = doc.data();
+        cpasMap[doc.id] = { ...doc.data(), id: doc.id };
       });
       
-      // Get all clients referred by these CPAs
-      let allClients = [];
-      if (cpaIds.length > 0) {
-        const clientsQuery = query(
-          collection(db, "Clients"),
-          where("referredBy", "in", cpaIds)
-        );
-        const clientsSnapshot = await getDocs(clientsQuery);
-        allClients = clientsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-      }
-
-      // Transform clients into transaction-like data
-      const txData = allClients.map(client => {
-        const amount = client.subscription?.amountPaid || 0;
-        const cpaData = cpasMap[client.referredBy] || {};
-        const cpaRate = (cpaData.commissionRate || 10) / 100;
-        const cpaCommission = amount * cpaRate;
-        const agentCommission = amount * 0.10;
+      // Get all subscription data for users referred by these CPAs
+      const txData = [];
+      let totalAgentRevenue = 0;
+      let totalCPACommissions = 0;
+      let activeSubscriptionsCount = 0;
+      const now = new Date();
+      
+      for (const cpaDoc of cpasSnapshot.docs) {
+        const cpaData = cpaDoc.data();
+        const cpaReferralCode = cpaData.referralCode;
         
-        return {
-          id: client.id,
-          createdAt: client.createdAt,
-          description: `Client subscription: ${client.displayName || client.name || client.email}`,
-          amount,
-          agentCommission,
-          cpaCommission,
-          cpaName: cpaData.displayName || "Unknown CPA",
-          clientName: client.displayName || client.name || client.email,
-          status: client.subscription?.status || 'active'
-        };
+        if (!cpaReferralCode) continue;
+        
+        // Get users with this CPA's referral code
+        const usersQuery = query(
+          collection(db, "user"),
+          where("referral_code", "==", cpaReferralCode)
+        );
+        const usersSnapshot = await getDocs(usersQuery);
+        
+        for (const userDoc of usersSnapshot.docs) {
+          const userId = userDoc.id;
+          const userData = userDoc.data();
+          
+          // Fetch subscriptions for this user
+          const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
+          
+          for (const subDoc of subsSnap.docs) {
+            const subData = subDoc.data();
+            const amount = getPlanPrice(subData.planname);
+            
+            if (amount === 0) continue;
+            
+            const cpaRate = (cpaData.commissionRate || 10) / 100;
+            const cpaCommission = amount * cpaRate;
+            
+            // Track totals for formula calculation
+            totalAgentRevenue += amount;
+            totalCPACommissions += cpaCommission;
+            
+            // Check if subscription is active
+            const expirationDate = subData.expiration_date?.toDate();
+            if (subData.status === 'active' && expirationDate && expirationDate > now) {
+              activeSubscriptionsCount++;
+            }
+            
+            // Parse purchase date
+            let purchaseDate = subData.purchase_date || subData.purchse_date || subData.created_Time;
+            
+            txData.push({
+              id: subDoc.id,
+              createdAt: purchaseDate,
+              description: `Subscription: ${subData.planname?.replace('writeoffgenie-', '').replace('com.writeoffgenie.', '')}`,
+              amount,
+              cpaCommission,
+              cpaName: cpaData.displayName || cpaData.name || "Unknown CPA",
+              clientName: userData.display_name || userData.name || userData.email,
+              status: subData.status || 'active'
+            });
+          }
+        }
+      }
+      
+      // Apply correct formula: Agent_Commission = Rate% × [(Total_Revenue - CPA_Commissions) - (Active_Subs × Maintenance_Cost)]
+      const netRevenue = totalAgentRevenue - totalCPACommissions;
+      const maintenanceCosts = activeSubscriptionsCount * maintenanceCostPerUser;
+      const netProfit = netRevenue - maintenanceCosts;
+      const calculatedAgentCommission = Math.max(0, netProfit * agentCommissionRate);
+      
+      // Calculate per-transaction agent commission proportionally
+      const perTxAgentShare = totalAgentRevenue > 0 ? (calculatedAgentCommission / totalAgentRevenue) : 0;
+      txData.forEach(tx => {
+        tx.agentCommission = tx.amount * perTxAgentShare;
       });
 
       // Sort by date
-      txData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+      txData.sort((a, b) => {
+        const aTime = a.createdAt?.seconds || a.createdAt?.getTime?.() / 1000 || 0;
+        const bTime = b.createdAt?.seconds || b.createdAt?.getTime?.() / 1000 || 0;
+        return bTime - aTime;
+      });
 
       setTransactions(txData);
 
-      // Calculate stats
-      const totalRev = txData.reduce((sum, tx) => sum + (tx.amount || 0), 0);
-      const totalAgent = txData.reduce((sum, tx) => sum + (tx.agentCommission || 0), 0);
-      const totalCPA = txData.reduce((sum, tx) => sum + (tx.cpaCommission || 0), 0);
-
+      // Use pre-calculated stats with correct formula
       setStats({
-        totalRevenue: totalRev,
-        totalAgentCommission: totalAgent,
-        totalCPACommission: totalCPA
+        totalRevenue: totalAgentRevenue,
+        totalAgentCommission: calculatedAgentCommission,
+        totalCPACommission: totalCPACommissions
       });
 
       setLoading(false);

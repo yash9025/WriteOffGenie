@@ -56,9 +56,7 @@ const Sidebar = ({ children, menuItems }) => {
     if (pathname.includes("earnings") || pathname.includes("performance")) {
       return "Search transactions...";
     }
-    if (pathname.includes("withdrawals") || pathname.includes("wallet") || pathname.includes("payouts")) {
-      return "Search withdrawals...";
-    }
+
     return "Search...";
   };
 
