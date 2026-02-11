@@ -16,7 +16,7 @@ const PLAN_PRICES = {
 
 const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
 
-export const onSubscriptionCreatedTrigger = onDocumentCreated(
+export const handleSubscriptionEarnings = onDocumentCreated(
     "user/{userId}/subscription/{subscriptionId}",
     async (event) => {
         const subData = event.data.data();
