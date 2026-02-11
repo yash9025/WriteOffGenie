@@ -5,7 +5,7 @@ import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
 import { useSearch } from "../../context/SearchContext";
 import { useNavigate } from "react-router-dom";
-import { Eye, UserPlus, Loader2, DollarSign, TrendingUp, Activity, Users, X } from "../../components/Icons";
+import { Eye, UserPlus, Loader2, DollarSign, TrendingUp, Activity, Users, X, RevenueIcon } from "../../components/Icons";
 import toast, { Toaster } from "react-hot-toast";
 import StatCard from "../../components/common/StatCard";
 import DataTable from "../../components/common/DataTable";
@@ -226,7 +226,7 @@ const CPAManagement = () => {
           title="Total Revenue from CPAs"
           value={formatCurrency(stats.totalRevenue)}
           description="All revenue generated"
-          icon={DollarSign}
+          icon={RevenueIcon}
           isLoading={loading}
         />
         <StatCard

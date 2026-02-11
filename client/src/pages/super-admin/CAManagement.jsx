@@ -8,6 +8,7 @@ import {
   Search, Loader2, Ban, CheckCircle2, UserPlus, X, DollarSign, TrendingUp, Wallet 
 } from "lucide-react";
 import StatCard from "../../components/common/StatCard";
+import { RevenueIcon } from "../../components/Icons";
 
 export default function CAManagement() {
   const [cpas, setCPAs] = useState([]);
@@ -210,7 +211,7 @@ export default function CAManagement() {
           title="Total Revenue from CPAs" 
           value={formatCurrency(globalStats.totalRevenue)} 
           description="Revenue generated from all CPAs" 
-          icon={DollarSign} 
+          icon={RevenueIcon} 
         />
         <StatCard 
           title="Total Commissions" 

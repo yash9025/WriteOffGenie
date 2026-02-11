@@ -3,7 +3,7 @@ import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
 import { useSearch } from "../../context/SearchContext";
-import { Loader2, DollarSign, TrendingUp, Percent } from "../../components/Icons";
+import { Loader2, DollarSign, TrendingUp, Percent, RevenueIcon } from "../../components/Icons";
 import toast, { Toaster } from "react-hot-toast";
 import StatCard from "../../components/common/StatCard";
 import DataTable from "../../components/common/DataTable";
@@ -160,7 +160,7 @@ const Earnings = () => {
           title="Total Revenue from CPAs"
           value={formatCurrency(stats.totalRevenue)}
           description="Verified gross revenue generated"
-          icon={DollarSign}
+          icon={RevenueIcon}
           isLoading={loading}
         />
         <StatCard

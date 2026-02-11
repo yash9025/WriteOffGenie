@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "../../services/firebase";
-import { Loader2, DollarSign, Wallet, TrendingUp, Users } from "../../components/Icons"; 
+import { Loader2, DollarSign, Wallet, TrendingUp, Users, RevenueIcon } from "../../components/Icons"; 
 import { AlertCircle, PieChart } from "lucide-react"; 
 import StatCard from "../../components/common/StatCard";
 import toast, { Toaster } from "react-hot-toast";
@@ -111,7 +111,7 @@ export default function EarningsTracking() {
             title="Total CPA Revenue" 
             value={formatCurrency(stats.cpaRev)} 
             description="Gross revenue from CPA referrals" 
-            icon={DollarSign}
+            icon={RevenueIcon}
           />
           <StatCard 
             title="CPA Commissions" 
@@ -138,7 +138,7 @@ export default function EarningsTracking() {
             title="Total Agent Revenue" 
             value={formatCurrency(stats.agentRev)} 
             description="Revenue from Agent-managed CPAs" 
-            icon={DollarSign}
+            icon={RevenueIcon}
           />
           <StatCard 
             title="Agent Commissions" 

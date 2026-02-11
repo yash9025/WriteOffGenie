@@ -10,7 +10,7 @@ import {
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
-import { Loader2, TrendingUp, Users, DollarSign, Activity, X } from "../../components/Icons";
+import { Loader2, TrendingUp, Users, DollarSign, Activity, X, RevenueIcon } from "../../components/Icons";
 import toast, { Toaster } from "react-hot-toast";
 import StatCard from "../../components/common/StatCard";
 import {
@@ -215,7 +215,7 @@ const Dashboard = () => {
           title="Total Earnings"
           value={formatCurrency(stats.totalEarnings)}
           description={`${stats.commissionRate}% of Net Profit`}
-          icon={DollarSign}
+          icon={RevenueIcon}
         />
         <StatCard
           title="Total Revenue"

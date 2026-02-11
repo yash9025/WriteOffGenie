@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "../../services/firebase";
-import { Loader2, DollarSign, Percent, Users } from "../../components/Icons";
+import { Loader2, RevenueIcon, Percent, Users } from "../../components/Icons";
 import StatCard from "../../components/common/StatCard";
 import toast, { Toaster } from "react-hot-toast";
 import { 
@@ -41,73 +41,72 @@ export default function AdminDashboard() {
 
   const formatCurrency = (value) => `$${(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
 
- useEffect(() => {
-  const fetchData = async () => {
-    try {
-      // 1. Just fetch the two main collections
-      const [txnsSnap, usersSnap] = await Promise.all([
-        getDocs(collection(db, "Transactions")),
-        getDocs(collection(db, "user"))
-      ]);
-      
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const monthlyData = months.map(m => ({ name: m, revenue: 0, agentCommission: 0, cpaCommission: 0 }));
-      
-      let totalRev = 0;
-      let totalCpaComm = 0;
-      let totalAgentComm = 0;
-      const processedSubs = new Set();
+  useEffect(() => {
+    // 1. Listen to Transactions (The Source of Truth)
+    const qTxns = query(collection(db, "Transactions"), where("type", "==", "commission"), where("status", "==", "completed"));
+    
+    // 2. Listen to Users (For Active Count)
+    const qUsers = query(collection(db, "user"));
 
-      // 2. Process Transactions (Money)
-      txnsSnap.docs.forEach(doc => {
-        const txn = doc.data();
-        if (txn.type !== "commission" || txn.status !== "completed") return;
-        if (processedSubs.has(txn.subId)) return;
-        processedSubs.add(txn.subId);
+    // Combine listeners
+    const unsubTxns = onSnapshot(qTxns, (txnsSnap) => {
+        // We nest the user listener inside or parallel, but for simple stats, let's process transactions first
+        processDashboard(txnsSnap);
+    }, (error) => {
+        console.error("Dashboard Error:", error);
+        setLoading(false);
+    });
 
-        const amountPaid = Number(txn.amountPaid || 0);
-        totalRev += amountPaid;
-        totalCpaComm += Number(txn.cpaEarnings || 0);
-        totalAgentComm += Number(txn.agentEarnings || 0);
+    // Helper to process data whenever snapshot updates
+    const processDashboard = async (txnsSnap) => {
+        try {
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const monthlyData = months.map(m => ({ name: m, revenue: 0, agentCommission: 0, cpaCommission: 0 }));
+            
+            let totalRev = 0;
+            let totalCpaComm = 0;
+            let totalAgentComm = 0;
+            
+            // Set to track unique users who have PAID
+            const paidUserIds = new Set();
 
-        const date = txn.createdAt?.toDate();
-        if (date) {
-          const monthIdx = date.getMonth();
-          monthlyData[monthIdx].revenue += amountPaid;
-          monthlyData[monthIdx].cpaCommission += Number(txn.cpaEarnings || 0);
-          monthlyData[monthIdx].agentCommission += Number(txn.agentEarnings || 0);
+            txnsSnap.docs.forEach(doc => {
+                const txn = doc.data();
+                const amountPaid = Number(txn.amountPaid || 0);
+                
+                totalRev += amountPaid;
+                totalCpaComm += Number(txn.cpaEarnings || 0);
+                totalAgentComm += Number(txn.agentEarnings || 0);
+                
+                // If they have a transaction, they are/were active
+                if (txn.userId) paidUserIds.add(txn.userId);
+
+                const date = txn.createdAt?.toDate();
+                if (date) {
+                    const monthIdx = date.getMonth();
+                    monthlyData[monthIdx].revenue += amountPaid;
+                    monthlyData[monthIdx].cpaCommission += Number(txn.cpaEarnings || 0);
+                    monthlyData[monthIdx].agentCommission += Number(txn.agentEarnings || 0);
+                }
+            });
+
+            setData({ 
+                totalRev, 
+                totalComm: totalCpaComm + totalAgentComm, 
+                activeUsers: paidUserIds.size, // Count unique users from ledger
+                chartData: monthlyData, 
+                agentComm: totalAgentComm, 
+                cpaComm: totalCpaComm 
+            });
+            setLoading(false);
+
+        } catch (e) {
+            console.error("Processing Error:", e);
         }
-      });
+    };
 
-      // 3. SIMPLE COUNT: Just check the user documents
-      let activeCount = 0;
-      usersSnap.docs.forEach(uDoc => {
-        const userData = uDoc.data();
-        // Check whichever field your app updates when a user pays
-        if (userData.subscription_status === 'active') {
-          activeCount++;
-        }
-      });
-
-      setData({ 
-        totalRev, 
-        totalComm: totalCpaComm + totalAgentComm, 
-        activeUsers: activeCount, 
-        chartData: monthlyData, 
-        agentComm: totalAgentComm, 
-        cpaComm: totalCpaComm 
-      });
-
-    } catch (e) {
-      console.error(e);
-      toast.error("Failed to load dashboard");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  fetchData();
-}, []);
+    return () => unsubTxns();
+  }, []);
 
   if (loading) return (
     <div className="h-[70vh] flex items-center justify-center">
@@ -125,9 +124,9 @@ export default function AdminDashboard() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <StatCard title="Total Revenue" value={formatCurrency(data.totalRev)} description="Verified gross revenue" icon={DollarSign} />
+        <StatCard title="Total Revenue" value={formatCurrency(data.totalRev)} description="Verified gross revenue" icon={RevenueIcon} />
         <StatCard title="Total Commissions" value={formatCurrency(data.totalComm)} description={`Agents: ${formatCurrency(data.agentComm)} + CPAs: ${formatCurrency(data.cpaComm)}`} icon={Percent} />
-        <StatCard title="Active Subscriptions" value={data.activeUsers.toLocaleString()} description="Currently active users" icon={Users} />
+        <StatCard title="Active Subscriptions" value={data.activeUsers.toLocaleString()} description="Unique paying users" icon={Users} />
       </div>
 
       <div className="bg-white border border-[#E3E6EA] rounded-[20px] p-6 shadow-sm">

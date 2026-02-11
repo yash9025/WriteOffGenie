@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import StatCard from "../../components/common/StatCard";
+import { RevenueIcon } from "../../components/Icons";
 
 export default function AgentManagement() {
   const { user } = useAuth();
@@ -250,7 +251,7 @@ export default function AgentManagement() {
           title="Total Revenue from Agents" 
           value={formatCurrency(stats.totalRevenue)} 
           description="Revenue generated from all agents' referred CPAs" 
-          icon={DollarSign} 
+          icon={RevenueIcon} 
         />
         <StatCard 
           title="Total Commissions" 
