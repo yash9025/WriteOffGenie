@@ -21,21 +21,28 @@ export const handleSubscriptionEarnings = onDocumentCreated(
     async (event) => {
         const subData = event.data.data();
         const userId = event.params.userId;
+        const subId = event.params.subscriptionId;
 
-        // 1. Validation: Only process active, paid subscriptions
         if (!subData || subData.status !== 'active') return null;
 
         try {
+            // 1. HARD LOCK: Use subId as the Document ID to prevent duplicates
+            const txnRef = db.collection("Transactions").doc(subId);
+            const txnCheck = await txnRef.get();
+            
+            if (txnCheck.exists) {
+                console.log(`⚠️ Transaction ${subId} already exists. Skipping.`);
+                return null;
+            }
+
             const planAmount = getPlanPrice(subData.planname);
             if (planAmount === 0) return null;
 
-            // 2. Resolve Referral Code (Normalize to uppercase)
             const userDoc = await db.collection("user").doc(userId).get();
             const rawCode = userDoc.data()?.referral_code || subData.ref_code;
             if (!rawCode) return null;
             const refCode = String(rawCode).toUpperCase().trim();
 
-            // 3. Find CPA Partner
             const cpaQuery = await db.collection("Partners")
                 .where("referralCode", "==", refCode)
                 .where("role", "==", "cpa")
@@ -47,21 +54,10 @@ export const handleSubscriptionEarnings = onDocumentCreated(
             const cpaData = cpaDoc.data();
             const batch = db.batch();
 
-            // 4. Idempotency: Check if commission transaction already exists for this subscription
-            const txnCheck = await db.collection("Transactions")
-                .where("subId", "==", event.params.subscriptionId)
-                .where("type", "==", "commission")
-                .limit(1).get();
-            if (!txnCheck.empty) {
-                // Already processed, skip
-                return null;
-            }
-
-            // 5. Calculate CPA Earnings
             const cpaRate = (cpaData.commissionRate || 10) / 100;
             const cpaCommission = planAmount * cpaRate;
 
-            // Update CPA Stats & Wallet
+            // Update CPA
             batch.update(cpaDoc.ref, {
                 "stats.totalRevenue": admin.firestore.FieldValue.increment(planAmount),
                 "stats.totalEarnings": admin.firestore.FieldValue.increment(cpaCommission),
@@ -70,7 +66,7 @@ export const handleSubscriptionEarnings = onDocumentCreated(
                 "updatedAt": admin.firestore.FieldValue.serverTimestamp()
             });
 
-            // 6. AGENT LOGIC: Calculate Agent cut if CPA was referred by an Agent
+            // Update Agent
             let agentCommission = 0;
             if (cpaData.referredBy) {
                 const agentRef = db.collection("Partners").doc(cpaData.referredBy);
@@ -79,9 +75,9 @@ export const handleSubscriptionEarnings = onDocumentCreated(
                     const agentData = agentDoc.data();
                     const agentRate = (agentData.commissionPercentage || 15) / 100;
                     const maintenance = Number(agentData.maintenanceCostPerUser || 6.00);
-                    // Formula: AgentRate * [(Revenue - CPA_Paid) - Maintenance]
                     const netProfit = (planAmount - cpaCommission) - maintenance;
                     agentCommission = Math.max(0, netProfit * agentRate);
+                    
                     if (agentCommission > 0) {
                         batch.update(agentRef, {
                             "stats.totalEarnings": admin.firestore.FieldValue.increment(agentCommission),
@@ -92,8 +88,7 @@ export const handleSubscriptionEarnings = onDocumentCreated(
                 }
             }
 
-            // 7. Audit Trail: Log the specific commission transaction
-            const txnRef = db.collection("Transactions").doc();
+            // Create Transaction with FIXED ID (subId)
             batch.set(txnRef, {
                 type: "commission",
                 plan: subData.planname,
@@ -103,13 +98,13 @@ export const handleSubscriptionEarnings = onDocumentCreated(
                 agentId: cpaData.referredBy || null,
                 agentEarnings: agentCommission,
                 userId: userId,
-                subId: event.params.subscriptionId,
+                subId: subId,
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
                 status: "completed"
             });
 
             await batch.commit();
-            console.log(`✅ Commission Sync: CPA +$${cpaCommission.toFixed(2)}, Agent +$${agentCommission.toFixed(2)}`);
+            return { success: true };
 
         } catch (error) {
             console.error("❌ Commission Trigger Error:", error);
@@ -117,12 +112,10 @@ export const handleSubscriptionEarnings = onDocumentCreated(
     }
 );
 
-// Keep your existing User Creation Trigger below...
 export const onUserCreatedTrigger = onDocumentCreated(
     "user/{userId}",
     async (event) => {
         const userData = event.data.data();
-        const userId = event.params.userId;
         try {
             const referralCode = userData.referral_code;
             if (!referralCode) return;
