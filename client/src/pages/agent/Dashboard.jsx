@@ -4,11 +4,13 @@ import {
   query,
   where,
   getDocs,
+  doc,
+  getDoc,
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../services/firebase";
 import { useAuth } from "../../context/AuthContext";
-import { Loader2, TrendingUp, Users, DollarSign, Activity } from "../../components/Icons";
+import { Loader2, TrendingUp, Users, DollarSign, Activity, X } from "../../components/Icons";
 import toast, { Toaster } from "react-hot-toast";
 import StatCard from "../../components/common/StatCard";
 import {
@@ -40,7 +42,7 @@ const CustomTooltip = ({ active, payload, label }) => {
                 </span>
               </div>
               <span className="text-[#111111] text-sm font-bold">
-                ${entry.value?.toLocaleString()}
+                ${entry.value?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </span>
             </div>
           ))}
@@ -50,19 +52,6 @@ const CustomTooltip = ({ active, payload, label }) => {
   }
   return null;
 };
-
-// Plan prices for revenue calculation (outside component to avoid dependency issues)
-const PLAN_PRICES = {
-  'writeoffgenie-premium-month': 25.00,
-  'com.writeoffgenie.premium.monthly': 25.00,
-  'writeoffgenie-pro-month': 15.00,
-  'com.writeoffgenie.pro.monthly': 15.00,
-  'writeoffgenie-premium-year': 239.99,
-  'com.writeoffgenie.premium.yearly': 239.99,
-  'writeoffgenie-pro-year': 143.99,
-  'com.writeoffgenie.pro.yearly': 143.99,
-};
-const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
 
 const Dashboard = () => {
   const { user, partnerData } = useAuth();
@@ -86,137 +75,84 @@ const Dashboard = () => {
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user?.uid) return;
 
-    // Load all data and calculate earnings using formula
-    const loadData = async () => {
+    const loadDashboardData = async () => {
       try {
-        // 1. Get agent data for commission settings
-        const agentDocSnap = await getDocs(query(collection(db, "Partners"), where("__name__", "==", user.uid)));
-        const agentData = agentDocSnap.docs[0]?.data() || {};
-        const agentCommissionRate = (agentData.commissionPercentage || 15) / 100;
-        const maintenanceCostPerUser = agentData.maintenanceCostPerUser || 6.00;
-
-        // 2. Get CPAs referred by this agent
-        const cpasQuery = query(
-          collection(db, "Partners"),
-          where("referredBy", "==", user.uid),
-          where("role", "==", "cpa")
-        );
-        const cpasSnapshot = await getDocs(cpasQuery);
-        
-        // 3. Calculate revenue, CPA commissions, and active subscriptions
-        let totalRevenue = 0;
-        let totalCPACommissions = 0;
-        let activeSubscriptionsCount = 0;
-        let activeCPAsCount = 0;
         const now = new Date();
-
-        // Monthly data for chart
-        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
         const currentYear = now.getFullYear();
-        const currentYearData = monthNames.map((month, i) => ({
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+        // 1. Parallel Fetch: Settings, CPA network, and unique Ledger Transactions
+        const [agentSnap, cpasSnap, txnsSnap] = await Promise.all([
+          getDoc(doc(db, "Partners", user.uid)),
+          getDocs(query(collection(db, "Partners"), where("referredBy", "==", user.uid), where("role", "==", "cpa"))),
+          getDocs(query(collection(db, "Transactions"), where("agentId", "==", user.uid), where("status", "==", "completed")))
+        ]);
+
+        const agentProfile = agentSnap.data() || {};
+        
+        // 2. Initialize Ledger Totals & Sets for Unique Counts
+        let totalRevenue = 0;
+        let totalCpaComm = 0;
+        let totalAgentEarn = 0;
+        const activeUsersSet = new Set();
+        const activeCpaSet = new Set();
+
+        const monthlyMap = monthNames.map((month, i) => ({
           month,
-          year: currentYear,
-          monthIndex: i,
           revenue: 0,
           agentCommission: 0,
           cpaCommission: 0,
         }));
 
-        for (const cpaDoc of cpasSnapshot.docs) {
-          const cpaData = cpaDoc.data();
-          const cpaReferralCode = cpaData.referralCode;
-          const cpaRate = (cpaData.commissionRate || 10) / 100;
-          
-          if (!cpaReferralCode) continue;
-          
-          // Get users with this CPA's referral code
-          const usersQuery = query(
-            collection(db, "user"),
-            where("referral_code", "==", cpaReferralCode)
-          );
-          const usersSnapshot = await getDocs(usersQuery);
-          
-          let cpaHasActiveUser = false;
-          
-          for (const userDoc of usersSnapshot.docs) {
-            const userId = userDoc.id;
-            
-            // Fetch subscriptions for this user
-            const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
-            
-            for (const subDoc of subsSnap.docs) {
-              const subData = subDoc.data();
-              const price = getPlanPrice(subData.planname);
-              
-              if (price === 0) continue;
-              
-              totalRevenue += price;
-              const cpaComm = price * cpaRate;
-              totalCPACommissions += cpaComm;
-              
-              // Check if active subscription
-              const expirationDate = subData.expiration_date?.toDate?.() || subData.expiration_date;
-              const isActive = subData.status === 'active' && expirationDate && new Date(expirationDate) > now;
-              
-              if (isActive) {
-                activeSubscriptionsCount++;
-                cpaHasActiveUser = true;
-              }
-              
-              // Add to monthly chart data
-              const purchaseDate = subData.purchase_date?.toDate?.() || subData.purchse_date?.toDate?.() || subData.created_Time?.toDate?.();
-              if (purchaseDate && purchaseDate.getFullYear() === currentYear) {
-                const monthIndex = purchaseDate.getMonth();
-                currentYearData[monthIndex].revenue += price;
-                currentYearData[monthIndex].cpaCommission += cpaComm;
-              }
-            }
-          }
-          
-          if (cpaHasActiveUser) activeCPAsCount++;
-        }
+        // 3. Process Ledger (Deduplicates via unique transaction documents)
+        txnsSnap.docs.forEach(doc => {
+          const txn = doc.data();
+          const amount = Number(txn.amountPaid || 0);
+          const aEarn = Number(txn.agentEarnings || 0);
+          const cEarn = Number(txn.cpaEarnings || 0);
 
-        // 4. Apply formula: Agent_Commission = Rate% × [(Revenue - CPA_Commissions) - (Active_Subs × Maintenance_Cost)]
-        const netRevenue = totalRevenue - totalCPACommissions;
-        const maintenanceCosts = activeSubscriptionsCount * maintenanceCostPerUser;
-        const netProfit = netRevenue - maintenanceCosts;
-        const calculatedEarnings = Math.max(0, netProfit * agentCommissionRate);
+          totalRevenue += amount;
+          totalAgentEarn += aEarn;
+          totalCpaComm += cEarn;
 
-        // Update chart with agent commission
-        currentYearData.forEach(month => {
-          if (month.revenue > 0) {
-            const monthNet = month.revenue - month.cpaCommission;
-            // Proportional maintenance and commission for the month
-            const monthRatio = month.revenue / (totalRevenue || 1);
-            const monthMaintenance = maintenanceCosts * monthRatio;
-            month.agentCommission = Math.max(0, (monthNet - monthMaintenance) * agentCommissionRate);
+          // Track unique IDs for accurate active counts
+          activeUsersSet.add(txn.userId);
+          activeCpaSet.add(txn.cpaId);
+
+          // Map to Chart months
+          const createdAt = txn.createdAt?.toDate?.();
+          if (createdAt && createdAt.getFullYear() === currentYear) {
+            const mIdx = createdAt.getMonth();
+            monthlyMap[mIdx].revenue += amount;
+            monthlyMap[mIdx].agentCommission += aEarn;
+            monthlyMap[mIdx].cpaCommission += cEarn;
           }
         });
 
+        // 4. Update Stats State
         setStats({
-          totalEarnings: calculatedEarnings,
-          commissionRate: agentData.commissionPercentage || 15,
-          maintenanceCost: maintenanceCostPerUser,
-          totalCPAs: cpasSnapshot.size,
-          activeCPAs: activeCPAsCount,
-          totalRevenue,
-          totalCPACommission: totalCPACommissions,
-          activeSubscriptions: activeSubscriptionsCount,
+          totalEarnings: totalAgentEarn,
+          commissionRate: agentProfile.commissionPercentage || 15,
+          maintenanceCost: agentProfile.maintenanceCostPerUser || 6.00,
+          totalCPAs: cpasSnap.size,
+          activeCPAs: activeCpaSet.size,
+          totalRevenue: totalRevenue,
+          totalCPACommission: totalCpaComm,
+          activeSubscriptions: activeUsersSet.size,
         });
-        
-        setChartData(currentYearData);
+
+        setChartData(monthlyMap);
         setLoading(false);
       } catch (error) {
-        console.error("Error fetching data:", error);
-        toast.error("Failed to load dashboard data");
+        console.error("Dashboard Load Error:", error);
+        toast.error("Failed to load real-time ledger data");
         setLoading(false);
       }
     };
 
-    loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadDashboardData();
   }, [user?.uid]);
 
   const handleSendInvite = async () => {
@@ -224,7 +160,6 @@ const Dashboard = () => {
       toast.error("Please fill in all required fields");
       return;
     }
-
     if (inviteForm.commissionRate < 10 || inviteForm.commissionRate > 50) {
       toast.error("Commission rate must be between 10% and 50%");
       return;
@@ -245,7 +180,6 @@ const Dashboard = () => {
       toast.success(`Invite sent to ${inviteForm.email} successfully!`);
       setInviteForm({ name: "", email: "", commissionRate: 10 });
     } catch (error) {
-      console.error("Error sending invite:", error);
       toast.error(error.message || "Failed to send invite");
     } finally {
       setSending(false);
@@ -253,7 +187,7 @@ const Dashboard = () => {
   };
 
   const formatCurrency = (value) =>
-    `$${value.toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+    `$${(value || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   if (loading) {
     return (
@@ -264,7 +198,9 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 pb-10">
+      <Toaster position="top-right" />
+      
       {/* Page Header */}
       <div>
         <h1 className="text-3xl font-bold text-[#111111]">Agent Dashboard</h1>
@@ -273,43 +209,39 @@ const Dashboard = () => {
         </p>
       </div>
 
-      {/* Stats Cards */}
+      {/* --- TOP STATS CARDS (Gross Revenue is now 2nd) --- */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Total Earnings"
           value={formatCurrency(stats.totalEarnings)}
-          description={`${stats.commissionRate}% × (Net Revenue - $${stats.maintenanceCost}/user)`}
+          description={`${stats.commissionRate}% of Net Profit`}
           icon={DollarSign}
+        />
+        <StatCard
+          title="Total Revenue"
+          value={formatCurrency(stats.totalRevenue)}
+          description="Gross CPA platform sales"
+          icon={Activity}
         />
         <StatCard
           title="Commission Rate"
           value={`${stats.commissionRate}%`}
-          description="Your commission percentage"
+          description="Your active payout rate"
           icon={TrendingUp}
         />
         <StatCard
           title="Total CPAs"
           value={stats.totalCPAs}
-          description="CPAs you've referred"
+          description="Partners in your network"
           icon={Users}
-        />
-        <StatCard
-          title="Active CPAs"
-          value={stats.activeCPAs}
-          description={`${stats.activeSubscriptions} active subscriptions`}
-          icon={TrendingUp}
         />
       </div>
 
-      {/* Invite CPA Section */}
+      {/* --- INVITE CPA SECTION (Restored Exact Layout) --- */}
       <div className="bg-white border border-[#E3E6EA] rounded-[20px] shadow-sm">
         <div className="px-6 py-4 border-b border-[#E3E6EA]">
-          <h3 className="text-lg font-semibold text-[#111111]">
-            Invite New CPA
-          </h3>
-          <p className="text-sm text-[#9499A1] mt-1">
-            Send an invitation to onboard a new CPA partner
-          </p>
+          <h3 className="text-lg font-semibold text-[#111111]">Invite New CPA</h3>
+          <p className="text-sm text-[#9499A1] mt-1">Send an invitation to onboard a new CPA partner</p>
         </div>
         <div className="p-6">
           <div className="flex flex-col lg:flex-row gap-5 items-end">
@@ -317,14 +249,12 @@ const Dashboard = () => {
               <label className="block text-sm font-medium text-[#111111] mb-2">
                 CPA Name <span className="text-red-500">*</span>
               </label>
-              <input
-                type="text"
-                value={inviteForm.name}
-                onChange={(e) =>
-                  setInviteForm({ ...inviteForm, name: e.target.value })
-                }
-                placeholder="Enter full name"
-                className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-xl text-[#111111] placeholder:text-[#9499A1] focus:outline-none focus:ring-2 focus:ring-[#4D7CFE] focus:border-transparent transition-all"
+              <input 
+                type="text" 
+                value={inviteForm.name} 
+                onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })} 
+                placeholder="Enter full name" 
+                className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-xl text-[#111111] placeholder:text-[#9499A1] focus:outline-none focus:ring-2 focus:ring-[#4D7CFE] focus:border-transparent transition-all" 
               />
             </div>
 
@@ -332,14 +262,12 @@ const Dashboard = () => {
               <label className="block text-sm font-medium text-[#111111] mb-2">
                 Email Address <span className="text-red-500">*</span>
               </label>
-              <input
-                type="email"
-                value={inviteForm.email}
-                onChange={(e) =>
-                  setInviteForm({ ...inviteForm, email: e.target.value })
-                }
-                placeholder="email@example.com"
-                className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-xl text-[#111111] placeholder:text-[#9499A1] focus:outline-none focus:ring-2 focus:ring-[#4D7CFE] focus:border-transparent transition-all"
+              <input 
+                type="email" 
+                value={inviteForm.email} 
+                onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })} 
+                placeholder="email@example.com" 
+                className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-xl text-[#111111] placeholder:text-[#9499A1] focus:outline-none focus:ring-2 focus:ring-[#4D7CFE] focus:border-transparent transition-all" 
               />
             </div>
 
@@ -348,29 +276,22 @@ const Dashboard = () => {
                 Commission Rate <span className="text-red-500">*</span>
               </label>
               <div className="relative">
-                <input
-                  type="number"
-                  value={inviteForm.commissionRate}
-                  onChange={(e) =>
-                    setInviteForm({
-                      ...inviteForm,
-                      commissionRate: parseInt(e.target.value) || 10,
-                    })
-                  }
-                  min="10"
-                  max="50"
-                  className="w-full px-4 py-2.5 pr-10 border border-[#E3E6EA] rounded-xl text-[#111111] focus:outline-none focus:ring-2 focus:ring-[#4D7CFE] focus:border-transparent transition-all"
+                <input 
+                  type="number" 
+                  value={inviteForm.commissionRate} 
+                  onChange={(e) => setInviteForm({ ...inviteForm, commissionRate: parseInt(e.target.value) || 10 })} 
+                  min="10" 
+                  max="50" 
+                  className="w-full px-4 py-2.5 pr-10 border border-[#E3E6EA] rounded-xl text-[#111111] focus:outline-none focus:ring-2 focus:ring-[#4D7CFE] focus:border-transparent transition-all" 
                 />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[#9499A1] font-medium">
-                  %
-                </span>
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[#9499A1] font-medium">%</span>
               </div>
             </div>
 
-            <button
-              onClick={handleSendInvite}
-              disabled={sending}
-              className="px-8 py-2.5 bg-black cursor-pointer hover:bg-gray-800 text-white rounded-xl font-medium transition-colors shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap min-w-40"
+            <button 
+              onClick={handleSendInvite} 
+              disabled={sending} 
+              className="px-8 py-2.5 bg-black hover:bg-gray-800 text-white rounded-xl font-medium transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap min-w-40"
             >
               {sending ? (
                 <>
@@ -385,83 +306,60 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Revenue Chart */}
+      {/* --- REVENUE TRENDS CHART --- */}
       <div className="bg-white border border-[#E3E6EA] rounded-[20px] p-6 shadow-sm">
-        <h2 className="text-xl font-semibold text-[#111111] mb-6">
-          Revenue & Commission Overview ({new Date().getFullYear()})
-        </h2>
-        
-        <div className="h-80 w-full"> 
+        <h2 className="text-xl font-semibold text-[#111111] mb-6">Revenue & Commission Overview ({new Date().getFullYear()})</h2>
+        <div className="h-80 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart
-              data={chartData}
-              margin={{ top: 10, right: 10, left: 0, bottom: 10 }}
-            >
-              <CartesianGrid
-                strokeDasharray="3 3"
-                vertical={true}
-                stroke="#E3E6EA"
+            <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={true} stroke="#E3E6EA" />
+              <XAxis 
+                dataKey="month" 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fill: "#9499A1", fontSize: 12 }} 
+                dy={10} 
               />
-
-              <XAxis
-                dataKey="month"
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: "#9499A1", fontSize: 12 }}
-                dy={10}
+              <YAxis 
+                axisLine={false} 
+                tickLine={false} 
+                tick={{ fill: "#9499A1", fontSize: 12 }} 
+                tickFormatter={(val) => `$${val}`} 
+                width={60} 
               />
-
-              <YAxis
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: "#9499A1", fontSize: 12 }}
-                tickFormatter={(val) => `$${val}`}
-                width={60}
+              <Tooltip content={<CustomTooltip />} cursor={{ stroke: "#E3E6EA", strokeWidth: 1 }} />
+              
+              <Line 
+                type="monotone" 
+                dataKey="revenue" 
+                name="Platform Revenue" 
+                stroke="#0F1728" 
+                strokeWidth={3} 
+                dot={false} 
+                activeDot={{ r: 6, strokeWidth: 0, fill: "#0F1728" }} 
               />
-
-              <Tooltip
-                content={<CustomTooltip />}
-                cursor={{ stroke: "#E3E6EA", strokeWidth: 1 }}
+              <Line 
+                type="monotone" 
+                dataKey="agentCommission" 
+                name="Your Earnings" 
+                stroke="#00D1A0" 
+                strokeWidth={3} 
+                dot={false} 
+                activeDot={{ r: 6, strokeWidth: 0, fill: "#00D1A0" }} 
               />
-
-              {/* Line 1: Total Revenue (Dark Blue/Black) */}
-              <Line
-                type="monotone"
-                dataKey="revenue"
-                name="Platform Revenue"
-                stroke="#0F1728"
-                strokeWidth={3}
-                dot={false}
-                activeDot={{ r: 6, strokeWidth: 0, fill: "#0F1728" }}
-              />
-
-              {/* Line 2: Agent Commission (Green) */}
-              <Line
-                type="monotone"
-                dataKey="agentCommission"
-                name="Your Commission"
-                stroke="#00D1A0"
-                strokeWidth={3}
-                dot={false}
-                activeDot={{ r: 6, strokeWidth: 0, fill: "#00D1A0" }}
-              />
-
-              {/* Line 3: CPA Commission (Purple) */}
-              <Line
-                type="monotone"
-                dataKey="cpaCommission"
-                name="CPA Commission"
-                stroke="#7F56D9"
-                strokeWidth={3}
-                dot={false}
-                activeDot={{ r: 6, strokeWidth: 0, fill: "#7F56D9" }}
+              <Line 
+                type="monotone" 
+                dataKey="cpaCommission" 
+                name="CPA Share" 
+                stroke="#7F56D9" 
+                strokeWidth={2} 
+                dot={false} 
+                activeDot={{ r: 6, strokeWidth: 0, fill: "#7F56D9" }} 
               />
             </LineChart>
           </ResponsiveContainer>
         </div>
       </div>
-
-      <Toaster position="top-right" />
     </div>
   );
 };

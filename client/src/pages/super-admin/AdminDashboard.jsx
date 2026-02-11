@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { collection, getDocs, collectionGroup } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 import { db } from "../../services/firebase";
 import { Loader2, DollarSign, Percent, Users } from "../../components/Icons";
 import StatCard from "../../components/common/StatCard";
@@ -28,18 +28,6 @@ const CustomTooltip = ({ active, payload, label }) => {
   return null;
 };
 
-const PLAN_PRICES = {
-  'writeoffgenie-premium-month': 25.00,
-  'com.writeoffgenie.premium.monthly': 25.00,
-  'writeoffgenie-pro-month': 15.00,
-  'com.writeoffgenie.pro.monthly': 15.00,
-  'writeoffgenie-premium-year': 239.99,
-  'com.writeoffgenie.premium.yearly': 239.99,
-  'writeoffgenie-pro-year': 143.99,
-  'com.writeoffgenie.pro.yearly': 143.99,
-};
-const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
-
 export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({
@@ -53,123 +41,73 @@ export default function AdminDashboard() {
 
   const formatCurrency = (value) => `$${(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [partnersSnap, usersSnap, allSubsSnap] = await Promise.all([
-          getDocs(collection(db, "Partners")),
-          getDocs(collection(db, "user")),
-          getDocs(collectionGroup(db, "subscription"))
-        ]);
-        
-        // 1. Map Users (Lowercase for matching)
-        const userRefCodes = {};
-        usersSnap.docs.forEach(d => {
-          const uData = d.data();
-          if (uData.referral_code) {
-            userRefCodes[d.id] = String(uData.referral_code).toLowerCase().trim();
-          }
-        });
-        
-        // 2. Map Partners
-        const partnerById = {};
-        const partnerByCode = {};
-        partnersSnap.docs.forEach(d => {
-          const pData = d.data();
-          const role = String(pData.role || '').toLowerCase().includes('agent') ? 'agent' : 'cpa';
-          const partner = {
-            id: d.id,
-            role,
-            referralCode: pData.referralCode ? String(pData.referralCode).toLowerCase().trim() : null,
-            referredBy: pData.referredBy,
-            commissionRate: (pData.commissionRate || 10) / 100,
-            commissionPercentage: pData.commissionPercentage || 15,
-            maintenanceCostPerUser: pData.maintenanceCostPerUser || 6.00,
-          };
-          partnerById[d.id] = partner;
-          if (partner.referralCode) partnerByCode[partner.referralCode] = partner;
-        });
+ useEffect(() => {
+  const fetchData = async () => {
+    try {
+      // 1. Just fetch the two main collections
+      const [txnsSnap, usersSnap] = await Promise.all([
+        getDocs(collection(db, "Transactions")),
+        getDocs(collection(db, "user"))
+      ]);
+      
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const monthlyData = months.map(m => ({ name: m, revenue: 0, agentCommission: 0, cpaCommission: 0 }));
+      
+      let totalRev = 0;
+      let totalCpaComm = 0;
+      let totalAgentComm = 0;
+      const processedSubs = new Set();
 
-        // 3. Process Subscriptions (LIFETIME CALCULATION)
-        const now = new Date();
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const monthlyData = months.map(m => ({ name: m, revenue: 0, agentCommission: 0, cpaCommission: 0 }));
-        
-        let totalRevenueCalculated = 0;
-        let activeUsersCount = 0;
-        let totalCpaCommCalculated = 0;
-        let totalAgentCommCalculated = 0;
+      // 2. Process Transactions (Money)
+      txnsSnap.docs.forEach(doc => {
+        const txn = doc.data();
+        if (txn.type !== "commission" || txn.status !== "completed") return;
+        if (processedSubs.has(txn.subId)) return;
+        processedSubs.add(txn.subId);
 
-        // Grouping for Agent Calc (To prevent double counting maintenance)
-        const agentCalcBuckets = {};
+        const amountPaid = Number(txn.amountPaid || 0);
+        totalRev += amountPaid;
+        totalCpaComm += Number(txn.cpaEarnings || 0);
+        totalAgentComm += Number(txn.agentEarnings || 0);
 
-        allSubsSnap.docs.forEach(subDoc => {
-          const subData = subDoc.data();
-          const price = getPlanPrice(subData.planname);
-          if (price === 0) return;
-          
-          // ADD TO GLOBAL REVENUE
-          totalRevenueCalculated += price;
-          
-          const purchaseDate = subData.purchase_date?.toDate?.() || subData.created_Time?.toDate?.();
-          const monthIdx = purchaseDate ? purchaseDate.getMonth() : null;
+        const date = txn.createdAt?.toDate();
+        if (date) {
+          const monthIdx = date.getMonth();
+          monthlyData[monthIdx].revenue += amountPaid;
+          monthlyData[monthIdx].cpaCommission += Number(txn.cpaEarnings || 0);
+          monthlyData[monthIdx].agentCommission += Number(txn.agentEarnings || 0);
+        }
+      });
 
-          const expirationDate = subData.expiration_date?.toDate?.();
-          const isActive = subData.status === 'active' && expirationDate && expirationDate > now;
-          if (isActive) activeUsersCount++;
+      // 3. SIMPLE COUNT: Just check the user documents
+      let activeCount = 0;
+      usersSnap.docs.forEach(uDoc => {
+        const userData = uDoc.data();
+        // Check whichever field your app updates when a user pays
+        if (userData.subscription_status === 'active') {
+          activeCount++;
+        }
+      });
 
-          if (monthIdx !== null) monthlyData[monthIdx].revenue += price;
+      setData({ 
+        totalRev, 
+        totalComm: totalCpaComm + totalAgentComm, 
+        activeUsers: activeCount, 
+        chartData: monthlyData, 
+        agentComm: totalAgentComm, 
+        cpaComm: totalCpaComm 
+      });
 
-          const userId = subDoc.ref.path.split('/')[1];
-          const refCode = userRefCodes[userId] || (subData.ref_code ? String(subData.ref_code).toLowerCase().trim() : null);
-          const cpa = refCode ? partnerByCode[refCode] : null;
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to load dashboard");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-          if (cpa) {
-            const currentCpaComm = price * cpa.commissionRate;
-            totalCpaCommCalculated += currentCpaComm;
-            if (monthIdx !== null) monthlyData[monthIdx].cpaCommission += currentCpaComm;
-
-            if (cpa.referredBy) {
-              const agent = partnerById[cpa.referredBy];
-              if (agent && agent.role === 'agent') {
-                if (!agentCalcBuckets[agent.id]) {
-                  agentCalcBuckets[agent.id] = { rev: 0, cpaComm: 0, active: 0, rate: agent.commissionPercentage/100, maint: agent.maintenanceCostPerUser, month: monthIdx };
-                }
-                agentCalcBuckets[agent.id].rev += price;
-                agentCalcBuckets[agent.id].cpaComm += currentCpaComm;
-                if (isActive) agentCalcBuckets[agent.id].active++;
-              }
-            }
-          }
-        });
-
-        // Final Agent Logic
-        Object.values(agentCalcBuckets).forEach(b => {
-          const netProfit = (b.rev - b.cpaComm) - (b.active * b.maint);
-          const comm = Math.max(0, netProfit * b.rate);
-          totalAgentCommCalculated += comm;
-          if (b.month !== null) monthlyData[b.month].agentCommission += comm;
-        });
-
-        setData({ 
-          totalRev: totalRevenueCalculated, 
-          totalComm: totalCpaCommCalculated + totalAgentCommCalculated, 
-          activeUsers: activeUsersCount, 
-          chartData: monthlyData, 
-          agentComm: totalAgentCommCalculated, 
-          cpaComm: totalCpaCommCalculated 
-        });
-
-      } catch (e) {
-        console.error(e);
-        toast.error("Failed to load data");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
+  fetchData();
+}, []);
 
   if (loading) return (
     <div className="h-[70vh] flex items-center justify-center">
@@ -183,11 +121,11 @@ export default function AdminDashboard() {
       
       <div>
          <h1 className="text-2xl font-semibold leading-9 text-[#111111]">Dashboard</h1>
-         <p className="text-base text-[#9499A1]">Real-time performance and lifetime revenue</p>
+         <p className="text-base text-[#9499A1]">Verified financial performance from ledger</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <StatCard title="Total Revenue" value={formatCurrency(data.totalRev)} description="Lifetime gross revenue (all subscriptions)" icon={DollarSign} />
+        <StatCard title="Total Revenue" value={formatCurrency(data.totalRev)} description="Verified gross revenue" icon={DollarSign} />
         <StatCard title="Total Commissions" value={formatCurrency(data.totalComm)} description={`Agents: ${formatCurrency(data.agentComm)} + CPAs: ${formatCurrency(data.cpaComm)}`} icon={Percent} />
         <StatCard title="Active Subscriptions" value={data.activeUsers.toLocaleString()} description="Currently active users" icon={Users} />
       </div>

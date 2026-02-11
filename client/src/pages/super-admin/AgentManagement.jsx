@@ -47,121 +47,76 @@ export default function AgentManagement() {
 
   const fetchAgents = async () => {
     try {
-      const agentsQuery = query(
-        collection(db, "Partners"),
-        where("role", "==", "agent")
-      );
-      
-      const snapshot = await getDocs(agentsQuery);
-      const agentsData = snapshot.docs.map(doc => ({
+      // 1. Parallel fetch of Agents and all commission Transactions
+      const [agentsSnap, txnsSnap] = await Promise.all([
+        getDocs(query(collection(db, "Partners"), where("role", "==", "agent"))),
+        getDocs(query(collection(db, "Transactions"), where("type", "==", "commission")))
+      ]);
+
+      const agentsData = agentsSnap.docs.map(doc => ({
         id: doc.id,
-        ...doc.data()
+        ...doc.data(),
+        cpaCount: 0,
+        activeClients: 0,
+        calculatedEarnings: 0,
+        totalRevenue: 0,
       }));
+
+      // 2. Fetch CPA counts for all agents in one go
+      const cpasSnap = await getDocs(query(collection(db, "Partners"), where("role", "==", "cpa")));
+      const cpaMap = {}; // To find which agent a CPA belongs to
+      
+      cpasSnap.docs.forEach(doc => {
+        const data = doc.data();
+        if (data.referredBy) {
+          cpaMap[doc.id] = data.referredBy;
+          const agent = agentsData.find(a => a.id === data.referredBy);
+          if (agent) agent.cpaCount++;
+        }
+      });
+
+      // 3. Process Transactions to calculate Agent stats
+      // Use a Set to track unique users per agent for "Active Clients"
+      const agentUserSets = {}; 
+      let totalRevenue = 0;
+      let totalAgentCommissions = 0;
+
+      txnsSnap.docs.forEach(doc => {
+        const txn = doc.data();
+        const agentId = txn.agentId;
+        const amount = Number(txn.amountPaid || 0);
+        const earnings = Number(txn.agentEarnings || 0);
+
+        if (agentId) {
+          const agent = agentsData.find(a => a.id === agentId);
+          if (agent) {
+            agent.totalRevenue += amount;
+            agent.calculatedEarnings += earnings;
+            
+            // Track unique active clients
+            if (!agentUserSets[agentId]) agentUserSets[agentId] = new Set();
+            agentUserSets[agentId].add(txn.userId);
+          }
+        }
+        
+        totalRevenue += amount;
+        totalAgentCommissions += earnings;
+      });
+
+      // 4. Map the unique client counts back to agents
+      agentsData.forEach(agent => {
+        agent.activeClients = agentUserSets[agent.id]?.size || 0;
+      });
 
       // Sort by created date
       agentsData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-      
-      // Pricing lookup table
-      const PLAN_PRICES = {
-        'writeoffgenie-premium-month': 25.00,
-        'com.writeoffgenie.premium.monthly': 25.00,
-        'writeoffgenie-pro-month': 15.00,
-        'com.writeoffgenie.pro.monthly': 15.00,
-        'writeoffgenie-premium-year': 239.99,
-        'com.writeoffgenie.premium.yearly': 239.99,
-        'writeoffgenie-pro-year': 143.99,
-        'com.writeoffgenie.pro.yearly': 143.99,
-      };
-      const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
-      
-      // Calculate derived stats for each agent with new formula
-      let totalActiveClients = 0;
-      let totalRevenue = 0;
-      let totalCPACommissions = 0;
-      let totalAgentCommissions = 0;
-      let totalNetProfit = 0;
-      
-      const now = new Date();
-      
-      for (const agent of agentsData) {
-        // Get CPAs referred by this agent
-        const cpasQuery = query(
-          collection(db, "Partners"),
-          where("referredBy", "==", agent.id),
-          where("role", "==", "cpa")
-        );
-        const cpasSnapshot = await getDocs(cpasQuery);
-        agent.cpaCount = cpasSnapshot.size;
-
-        let agentTotalRevenue = 0;
-        let agentCPACommissions = 0;
-        let agentActiveSubscriptions = 0;
-        let agentActiveClients = 0;
-
-        for (const cpaDoc of cpasSnapshot.docs) {
-          const cpaData = cpaDoc.data();
-          const cpaCommissionRate = (cpaData.commissionRate || 10) / 100;
-          const cpaReferralCode = cpaData.referralCode;
-          if (!cpaReferralCode) continue;
-          // Query users who have this CPA's referral code
-          const usersQuery = query(
-            collection(db, "user"),
-            where("referral_code", "==", cpaReferralCode)
-          );
-          const usersSnapshot = await getDocs(usersQuery);
-          for (const userDoc of usersSnapshot.docs) {
-            const userId = userDoc.id;
-            // Fetch all subscriptions for this user
-            const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
-            let userHasActiveSubscription = false;
-            let userTotalRevenue = 0;
-            for (const subDoc of subsSnap.docs) {
-              const subData = subDoc.data();
-              const price = getPlanPrice(subData.planname);
-              userTotalRevenue += price;
-              // Check if this subscription is active
-              const expirationDate = subData.expiration_date?.toDate();
-              if (subData.status === 'active' && expirationDate && expirationDate > now) {
-                userHasActiveSubscription = true;
-              }
-            }
-            agentTotalRevenue += userTotalRevenue;
-            const cpaCommission = userTotalRevenue * cpaCommissionRate;
-            agentCPACommissions += cpaCommission;
-            if (userHasActiveSubscription) {
-              agentActiveClients++;
-            }
-          }
-        }
-
-        // Apply New Formula: Agent_Commission = (Agent_Commission_Rate %) * [(Total_Revenue - Total_CPA_Commissions) - (Active_Subscriptions * Maintenance_Cost)]
-        const agentCommissionRate = (agent.commissionPercentage || 15) / 100;
-        const maintenanceCost = agent.maintenanceCostPerUser || 6.00;
-        
-        const netRevenue = agentTotalRevenue - agentCPACommissions;
-        const maintenanceCosts = agentActiveClients * maintenanceCost;
-        const netProfit = netRevenue - maintenanceCosts;
-        const agentCommission = Math.max(0, netProfit * agentCommissionRate); // Floor at 0
-
-        agent.activeClients = agentActiveClients;
-        agent.calculatedEarnings = agentCommission;
-        agent.netProfit = netProfit;
-        agent.totalRevenue = agentTotalRevenue;
-
-        totalActiveClients += agentActiveClients;
-        totalRevenue += agentTotalRevenue;
-        totalCPACommissions += agentCPACommissions;
-        totalAgentCommissions += agentCommission;
-        totalNetProfit += netProfit;
-      }
 
       setAgents(agentsData);
-
       setStats({
         totalRevenue,
         totalAgentCommission: totalAgentCommissions,
-        activeSubscriptions: totalActiveClients,
-        totalNetProfit
+        activeSubscriptions: Object.values(agentUserSets).reduce((acc, set) => acc + set.size, 0),
+        totalNetProfit: totalRevenue - totalAgentCommissions // Simplified net
       });
 
       setLoading(false);
@@ -171,7 +126,6 @@ export default function AgentManagement() {
       setLoading(false);
     }
   };
-
   // --- ACTIONS ---
 
   const handleSendInvite = async (e) => {

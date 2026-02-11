@@ -1,152 +1,100 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { collection, getDocs, collectionGroup } from "firebase/firestore";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "../../services/firebase";
-// Standard imports from your local file
 import { Loader2, DollarSign, Wallet, TrendingUp, Users } from "../../components/Icons"; 
-// Direct import to bypass the "export named AlertCircle" error
 import { AlertCircle, PieChart } from "lucide-react"; 
 import StatCard from "../../components/common/StatCard";
 import toast, { Toaster } from "react-hot-toast";
 
-const PLAN_PRICES = {
-  'writeoffgenie-premium-month': 25.00,
-  'com.writeoffgenie.premium.monthly': 25.00,
-  'writeoffgenie-pro-month': 15.00,
-  'com.writeoffgenie.pro.monthly': 15.00,
-  'writeoffgenie-premium-year': 239.99,
-  'com.writeoffgenie.premium.yearly': 239.99,
-  'writeoffgenie-pro-year': 143.99,
-  'com.writeoffgenie.pro.yearly': 143.99,
-};
-
 export default function EarningsTracking() {
   const [loading, setLoading] = useState(true);
-  const [rawSubData, setRawSubData] = useState([]);
-  const [partnerMap, setPartnerMap] = useState({ byId: {}, byCode: {} });
+  const [ledgerData, setLedgerData] = useState([]);
 
   useEffect(() => {
-    const fetchData = async () => {
+    // Listen to the Transactions Ledger in Real-Time
+    // We fetch all completed commission transactions
+    const q = query(
+      collection(db, "Transactions"), 
+      where("type", "==", "commission"),
+      where("status", "==", "completed")
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
       try {
-        const [pSnap, uSnap, allSubsSnap] = await Promise.all([
-          getDocs(collection(db, "Partners")),
-          getDocs(collection(db, "user")),
-          getDocs(collectionGroup(db, "subscription"))
-        ]);
+        const transactions = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
         
-        const userRefCodes = {};
-        uSnap.docs.forEach(d => {
-          const u = d.data();
-          if (u.referral_code) {
-            userRefCodes[d.id] = String(u.referral_code).toLowerCase().trim();
-          }
-        });
-        
-        const byId = {};
-        const byCode = {};
-        pSnap.forEach(d => {
-          const p = d.data();
-          const partner = { 
-            id: d.id,
-            name: p.displayName || p.name || "Unknown", 
-            code: p.referralCode ? String(p.referralCode).toLowerCase().trim() : null, 
-            role: String(p.role || '').toLowerCase(),
-            cpaRate: (p.commissionRate || 10) / 100,
-            agentRate: (p.commissionPercentage || 15) / 100,
-            maint: Number(p.maintenanceCostPerUser || 6.00),
-            referredBy: p.referredBy
-          };
-          byId[d.id] = partner;
-          if (partner.code) byCode[partner.code] = partner;
-        });
-
-        const subscriptions = allSubsSnap.docs.map(subDoc => {
-          const sub = subDoc.data();
-          const userId = subDoc.ref.path.split('/')[1];
-          const price = PLAN_PRICES[sub.planname] || 0;
-          const finalCode = userRefCodes[userId] || (sub.ref_code ? String(sub.ref_code).toLowerCase().trim() : null);
-
-          return {
-            id: subDoc.id,
-            price,
-            status: sub.status,
-            expiration: sub.expiration_date?.toDate ? sub.expiration_date.toDate() : (sub.expiration_date ? new Date(sub.expiration_date) : null),
-            refCode: finalCode
-          };
-        });
-
-        setPartnerMap({ byId, byCode });
-        setRawSubData(subscriptions);
-      } catch (e) {
-        console.error("Fetch error:", e);
-        toast.error("Failed to sync live data");
-      } finally {
+        setLedgerData(transactions);
         setLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
-
-  const stats = useMemo(() => {
-    const now = new Date();
-    let cpaTotalRev = 0;
-    let cpaTotalComm = 0;
-    let agentTotalRev = 0;
-    const agentBuckets = {};
-
-    rawSubData.forEach(sub => {
-      if (sub.price === 0 || !sub.refCode) return;
-
-      const cpa = partnerMap.byCode[sub.refCode];
-      if (!cpa) return;
-
-      cpaTotalRev += sub.price;
-      const cpaComm = sub.price * cpa.cpaRate;
-      cpaTotalComm += cpaComm;
-
-      if (cpa.referredBy && partnerMap.byId[cpa.referredBy]) {
-        const agent = partnerMap.byId[cpa.referredBy];
-        if (agent.role.includes('agent')) {
-          const agentId = agent.id;
-          if (!agentBuckets[agentId]) {
-            agentBuckets[agentId] = { rev: 0, cpaPaid: 0, activeCount: 0, config: agent };
-          }
-          agentBuckets[agentId].rev += sub.price;
-          agentBuckets[agentId].cpaPaid += cpaComm;
-          const isActive = sub.status === 'active' && sub.expiration && sub.expiration > now;
-          if (isActive) agentBuckets[agentId].activeCount++;
-          agentTotalRev += sub.price;
-        }
+      } catch (error) {
+        console.error("Ledger Sync Error:", error);
+        toast.error("Failed to sync financial ledger");
+        setLoading(false);
       }
     });
 
+    return () => unsubscribe();
+  }, []);
+
+  const stats = useMemo(() => {
+    // Initialize Accumulators
+    let cpaTotalRev = 0;
+    let cpaTotalComm = 0;
+    
+    let agentTotalRev = 0;
     let agentTotalComm = 0;
-    Object.values(agentBuckets).forEach(b => {
-      const netProfit = (b.rev - b.cpaPaid) - (b.activeCount * b.config.maint);
-      agentTotalComm += Math.max(0, netProfit * b.config.agentRate);
+
+    // Single pass aggregation of the Ledger
+    ledgerData.forEach(txn => {
+      const amount = Number(txn.amountPaid || 0);
+      const cpaEarn = Number(txn.cpaEarnings || 0);
+      const agentEarn = Number(txn.agentEarnings || 0);
+
+      // --- CPA TIER STATS ---
+      // If a transaction has a CPA ID, it counts towards CPA Revenue
+      if (txn.cpaId) {
+        cpaTotalRev += amount;
+        cpaTotalComm += cpaEarn;
+      }
+
+      // --- AGENT TIER STATS ---
+      // If a transaction has an Agent ID, it counts towards Agent Revenue
+      // Note: This is usually a subset of CPA revenue, as Agents refer CPAs.
+      if (txn.agentId) {
+        agentTotalRev += amount;
+        agentTotalComm += agentEarn;
+      }
     });
 
     return {
       cpaRev: cpaTotalRev,
       cpaComm: cpaTotalComm,
-      cpaNet: cpaTotalRev - cpaTotalComm,
+      cpaNet: cpaTotalRev - cpaTotalComm, // What the platform keeps after paying CPA
+      
       agentRev: agentTotalRev,
       agentComm: agentTotalComm,
-      agentNet: agentTotalRev - agentTotalComm
+      agentNet: agentTotalRev - agentTotalComm // What the platform keeps after paying Agent (on Agent-linked deals)
     };
-  }, [rawSubData, partnerMap]);
+  }, [ledgerData]);
 
   const formatCurrency = (val) => `$${val.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
 
-  if (loading) return <div className="h-96 flex items-center justify-center"><Loader2 className="animate-spin text-blue-500" size={32}/></div>;
+  if (loading) return (
+    <div className="h-96 flex items-center justify-center">
+      <Loader2 className="animate-spin text-blue-500" size={32}/>
+    </div>
+  );
 
   return (
-    <div className="space-y-10 pb-20">
+    <div className="space-y-10 pb-20 animate-in fade-in duration-500">
       <Toaster position="top-right" />
       
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Financial Tracking</h1>
-          <p className="text-slate-500">Real-time revenue and commission analysis</p>
+          <p className="text-slate-500">Verified real-time ledger analysis</p>
         </div>
         <div className="p-3 bg-blue-50 rounded-full text-blue-600">
           <PieChart size={24} />
@@ -159,9 +107,24 @@ export default function EarningsTracking() {
           <Users size={12}/> CPA Performance Tier
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <StatCard title="Total CPA Revenue" value={formatCurrency(stats.cpaRev)} description="All revenue via CPA codes" icon={DollarSign}/>
-          <StatCard title="CPA Commissions" value={formatCurrency(stats.cpaComm)} description="Total earnings paid to CPAs" icon={TrendingUp}/>
-          <StatCard title="CPA Net Profit" value={formatCurrency(stats.cpaNet)} description="Revenue after CPA payout" icon={Wallet}/>
+          <StatCard 
+            title="Total CPA Revenue" 
+            value={formatCurrency(stats.cpaRev)} 
+            description="Gross revenue from CPA referrals" 
+            icon={DollarSign}
+          />
+          <StatCard 
+            title="CPA Commissions" 
+            value={formatCurrency(stats.cpaComm)} 
+            description="Total payouts to CPAs" 
+            icon={TrendingUp}
+          />
+          <StatCard 
+            title="Platform Net (CPA)" 
+            value={formatCurrency(stats.cpaNet)} 
+            description="Revenue retained after CPA payout" 
+            icon={Wallet}
+          />
         </div>
       </section>
 
@@ -171,19 +134,34 @@ export default function EarningsTracking() {
           <Users size={12}/> Agent Performance Tier
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <StatCard title="Total Agent Revenue" value={formatCurrency(stats.agentRev)} description="Revenue from Agent-led network" icon={DollarSign}/>
-          <StatCard title="Agent Commissions" value={formatCurrency(stats.agentComm)} description="Net profit share for Agents" icon={TrendingUp}/>
-          <StatCard title="Agent Net Profit" value={formatCurrency(stats.agentNet)} description="Platform revenue after Agent cut" icon={Wallet}/>
+          <StatCard 
+            title="Total Agent Revenue" 
+            value={formatCurrency(stats.agentRev)} 
+            description="Revenue from Agent-managed CPAs" 
+            icon={DollarSign}
+          />
+          <StatCard 
+            title="Agent Commissions" 
+            value={formatCurrency(stats.agentComm)} 
+            description="Net profit share paid to Agents" 
+            icon={TrendingUp}
+          />
+          <StatCard 
+            title="Platform Net (Agent)" 
+            value={formatCurrency(stats.agentNet)} 
+            description="Revenue retained after Agent payout" 
+            icon={Wallet}
+          />
         </div>
       </section>
 
-      {/* Troubleshooting Alert */}
+      {/* Empty State Alert */}
       {stats.cpaRev === 0 && (
-        <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex gap-3 text-amber-800">
-          <AlertCircle className="shrink-0" size={20} />
+        <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex gap-3 text-slate-600">
+          <AlertCircle className="shrink-0 text-slate-400" size={20} />
           <div className="text-sm">
-            <p className="font-bold">No live data found</p>
-            <p>Ensure the <strong>referral_code</strong> on users matches the <strong>referralCode</strong> in Partners exactly.</p>
+            <p className="font-bold text-slate-800">No ledger activity found</p>
+            <p>Financial stats will appear here as soon as the first successful commission transaction is recorded.</p>
           </div>
         </div>
       )}

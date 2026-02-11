@@ -37,111 +37,76 @@ const CPAManagement = () => {
   useEffect(() => {
     if (!user) return;
     fetchCPAs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
 
-  // --- DATA FETCHING ---
+  // --- DATA FETCHING (OPTIMIZED WITH TRANSACTIONS) ---
   const fetchCPAs = async () => {
     try {
-      // Pricing lookup
-      const PLAN_PRICES = {
-        'writeoffgenie-premium-month': 25.00,
-        'com.writeoffgenie.premium.monthly': 25.00,
-        'writeoffgenie-pro-month': 15.00,
-        'com.writeoffgenie.pro.monthly': 15.00,
-        'writeoffgenie-premium-year': 239.99,
-        'com.writeoffgenie.premium.yearly': 239.99,
-        'writeoffgenie-pro-year': 143.99,
-        'com.writeoffgenie.pro.yearly': 143.99,
-      };
-      const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
-      const now = new Date();
+      // 1. Parallel Fetch: Referred CPAs and all Transactions related to this Agent
+      const [cpasSnap, txnsSnap] = await Promise.all([
+        getDocs(query(collection(db, "Partners"), where("referredBy", "==", user.uid), where("role", "==", "cpa"))),
+        getDocs(query(collection(db, "Transactions"), where("agentId", "==", user.uid), where("type", "==", "commission")))
+      ]);
 
-      const cpasQuery = query(
-        collection(db, "Partners"),
-        where("referredBy", "==", user.uid),
-        where("role", "==", "cpa")
-      );
-      
-      const snapshot = await getDocs(cpasQuery);
-      const cpasData = [];
-      
-      // Fetch users for each CPA to calculate stats
-      for (const doc of snapshot.docs) {
-        const cpaData = { id: doc.id, ...doc.data() };
-        const cpaReferralCode = cpaData.referralCode;
-        
-        let totalRevenue = 0;
-        let activeClients = 0;
-        let totalClients = 0;
-        
-        if (cpaReferralCode) {
-          // Get users with this CPA's referral code
-          const usersQuery = query(
-            collection(db, "user"),
-            where("referral_code", "==", cpaReferralCode)
-          );
-          const usersSnapshot = await getDocs(usersQuery);
-          totalClients = usersSnapshot.size;
-          
-          for (const userDoc of usersSnapshot.docs) {
-            const userId = userDoc.id;
-            
-            // Fetch subscriptions for this user
-            const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
-            let userIsActive = false;
-            
-            for (const subDoc of subsSnap.docs) {
-              const subData = subDoc.data();
-              const price = getPlanPrice(subData.planname);
-              totalRevenue += price;
-              
-              // Check if subscription is active
-              let expirationDate = subData.expiration_date;
-              if (expirationDate?.toDate) expirationDate = expirationDate.toDate();
-              else if (typeof expirationDate === 'string') expirationDate = new Date(expirationDate);
-              
-              if (subData.status === 'active' && expirationDate && expirationDate > now) {
-                userIsActive = true;
-              }
-            }
-            
-            if (userIsActive) activeClients++;
-          }
+      // 2. Map Transactions to CPAs
+      // We use this to sum up money and count unique active clients without nested loops
+      const cpaFinancials = {};
+      let globalRevenue = 0;
+      let globalCPAComm = 0;
+      const globalActiveClients = new Set();
+
+      txnsSnap.docs.forEach(doc => {
+        const txn = doc.data();
+        if (txn.status !== "completed") return;
+
+        const cpaId = txn.cpaId;
+        const rev = Number(txn.amountPaid || 0);
+        const cpaEarn = Number(txn.cpaEarnings || 0);
+
+        if (!cpaFinancials[cpaId]) {
+          cpaFinancials[cpaId] = { revenue: 0, earnings: 0, clients: new Set() };
         }
-        
-        const cpaRate = (cpaData.commissionRate || 10) / 100;
-        const totalEarnings = totalRevenue * cpaRate;
-        
-        cpaData.calculatedStats = {
-          totalRevenue,
-          totalEarnings,
-          activeClients,
-          totalClients
+
+        cpaFinancials[cpaId].revenue += rev;
+        cpaFinancials[cpaId].earnings += cpaEarn;
+        cpaFinancials[cpaId].clients.add(txn.userId);
+
+        globalRevenue += rev;
+        globalCPAComm += cpaEarn;
+        globalActiveClients.add(txn.userId);
+      });
+
+      // 3. Assemble CPA Data for the Table
+      const processedCPAs = cpasSnap.docs.map(doc => {
+        const data = doc.data();
+        const financials = cpaFinancials[doc.id] || { revenue: 0, earnings: 0, clients: new Set() };
+
+        return {
+          id: doc.id,
+          ...data,
+          calculatedStats: {
+            totalRevenue: financials.revenue,
+            totalEarnings: financials.earnings,
+            activeClients: financials.clients.size
+          }
         };
-        
-        cpasData.push(cpaData);
-      }
+      });
 
-      cpasData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
-      setCPAs(cpasData);
-
-      // Overall Stats Calculation
-      const totalRevenue = cpasData.reduce((sum, cpa) => sum + (cpa.calculatedStats?.totalRevenue || 0), 0);
-      const totalCPACommission = cpasData.reduce((sum, cpa) => sum + (cpa.calculatedStats?.totalEarnings || 0), 0);
-      const activeSubscriptions = cpasData.reduce((sum, cpa) => sum + (cpa.calculatedStats?.activeClients || 0), 0);
+      // Sort by newest first
+      processedCPAs.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
       
+      setCPAs(processedCPAs);
       setStats({
-        totalRevenue,
-        totalCPACommission,
-        pendingWithdrawals: 0,
-        activeSubscriptions
+        totalRevenue: globalRevenue,
+        totalCPACommission: globalCPAComm,
+        pendingWithdrawals: 0, // Placeholder for withdrawal system
+        activeSubscriptions: globalActiveClients.size
       });
 
       setLoading(false);
     } catch (error) {
       console.error("Error fetching CPAs:", error);
-      toast.error("Failed to load CPAs");
+      toast.error("Failed to load CPA data");
       setLoading(false);
     }
   };
@@ -154,29 +119,26 @@ const CPAManagement = () => {
 
     try {
       const fn = httpsCallable(getFunctions(), 'sendCPAInvite');
-      // Pass 'invitedBy' so the system knows this Agent invited the CPA
       await fn({ 
         ...inviteForm, 
         invitedBy: user.uid,
-        inviteType: 'cpa' // Explicitly stating type
+        inviteType: 'cpa'
       });
       
       toast.success("Invitation sent successfully!", { id: toastId });
       setShowInviteModal(false);
       setInviteForm({ name: "", email: "", commissionRate: 10 });
+      fetchCPAs(); // Refresh list
     } catch (e) {
       console.error(e);
-      const errorMsg = e.message.includes("already exists") 
-        ? "A partner with this email already exists." 
-        : "Failed to send invitation. Please try again.";
-      toast.error(errorMsg, { id: toastId });
+      toast.error(e.message || "Failed to send invitation", { id: toastId });
     } finally {
       setSendingInvite(false);
     }
   };
 
   // --- HELPERS ---
-  const formatCurrency = (value) => `$${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+  const formatCurrency = (value) => `$${(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
   const formatDate = (timestamp) => {
     if (!timestamp) return "N/A";
     return new Date(timestamp.seconds * 1000).toLocaleDateString('en-US', {
@@ -208,10 +170,8 @@ const CPAManagement = () => {
     <tr key={index} className="border-b border-[#E3E6EA] hover:bg-[#F7F9FC] transition-colors">
       <td className="px-6 py-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-[#4D7CFE1A] flex items-center justify-center">
-            <span className="text-[#4D7CFE] font-semibold">
-              {cpa.displayName?.charAt(0).toUpperCase() || "C"}
-            </span>
+          <div className="w-10 h-10 rounded-full bg-[#4D7CFE1A] flex items-center justify-center text-[#4D7CFE] font-semibold">
+            {cpa.displayName?.charAt(0).toUpperCase() || "C"}
           </div>
           <span className="font-medium text-[#111111]">{cpa.displayName || "Unknown"}</span>
         </div>
@@ -219,7 +179,7 @@ const CPAManagement = () => {
       <td className="px-6 py-4 text-[#9499A1]">{cpa.email}</td>
       <td className="px-6 py-4 text-[#9499A1]">{formatDate(cpa.createdAt)}</td>
       <td className="px-6 py-4 font-semibold text-[#111111]">
-        {formatCurrency(cpa.calculatedStats?.totalEarnings || 0)}
+        {formatCurrency(cpa.calculatedStats?.totalEarnings)}
       </td>
       <td className="px-6 py-4 text-center">
         <span className="inline-block px-3 py-1 bg-[#4D7CFE1A] text-[#4D7CFE] rounded-full text-sm font-medium">
@@ -228,9 +188,7 @@ const CPAManagement = () => {
       </td>
       <td className="px-6 py-4">
         <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
-          cpa.status === 'active' 
-            ? 'bg-green-100 text-green-700' 
-            : 'bg-gray-100 text-gray-700'
+          cpa.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
         }`}>
           {cpa.status || 'active'}
         </span>
@@ -249,7 +207,6 @@ const CPAManagement = () => {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-[#111111]">CPA Management</h1>
@@ -264,7 +221,6 @@ const CPAManagement = () => {
         </button>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Total Revenue from CPAs"
@@ -290,13 +246,12 @@ const CPAManagement = () => {
         <StatCard
           title="Active Subscriptions"
           value={stats.activeSubscriptions}
-          description="From all CPAs"
+          description="Unique active users"
           icon={Users}
           isLoading={loading}
         />
       </div>
 
-      {/* CPAs Table */}
       <DataTable
         columns={columns}
         data={filteredCPAs}
@@ -305,73 +260,31 @@ const CPAManagement = () => {
         renderRow={renderRow}
       />
 
-      {/* --- INVITE MODAL (Exact Copy) --- */}
       {showInviteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 relative animate-in fade-in zoom-in duration-200">
-            <button
-              onClick={() => setShowInviteModal(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
-            >
+            <button onClick={() => setShowInviteModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer">
               <X size={20} />
             </button>
-
             <h2 className="text-xl font-semibold text-slate-900 mb-1">Invite CPA Partner</h2>
             <p className="text-sm text-slate-500 mb-6">Send an invitation to join the partner program</p>
-
             <form onSubmit={handleSendInvite} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Full Name</label>
-                <input
-                  type="text"
-                  value={inviteForm.name}
-                  onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })}
-                  placeholder="Enter partner's full name"
-                  className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-lg text-sm focus:outline-none focus:border-[#4D7CFE] transition-colors"
-                  required
-                />
+                <input type="text" value={inviteForm.name} onChange={(e) => setInviteForm({ ...inviteForm, name: e.target.value })} placeholder="Enter partner's full name" className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-lg text-sm focus:outline-none focus:border-[#4D7CFE] transition-colors" required />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Email Address</label>
-                <input
-                  type="email"
-                  value={inviteForm.email}
-                  onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
-                  placeholder="Enter partner's email"
-                  className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-lg text-sm focus:outline-none focus:border-[#4D7CFE] transition-colors"
-                  required
-                />
+                <input type="email" value={inviteForm.email} onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })} placeholder="Enter partner's email" className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-lg text-sm focus:outline-none focus:border-[#4D7CFE] transition-colors" required />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Commission Rate (%)</label>
-                <input
-                  type="number"
-                  min="10"
-                  max="50"
-                  value={inviteForm.commissionRate}
-                  onChange={(e) => setInviteForm({ ...inviteForm, commissionRate: parseInt(e.target.value) || 10 })}
-                  placeholder="10"
-                  className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-lg text-sm focus:outline-none focus:border-[#4D7CFE] transition-colors"
-                  required
-                />
+                <input type="number" min="10" max="50" value={inviteForm.commissionRate} onChange={(e) => setInviteForm({ ...inviteForm, commissionRate: parseInt(e.target.value) || 10 })} className="w-full px-4 py-2.5 border border-[#E3E6EA] rounded-lg text-sm focus:outline-none focus:border-[#4D7CFE] transition-colors" required />
                 <p className="mt-1 text-xs text-slate-400">Partner will earn this percentage on each referred subscription</p>
               </div>
-
               <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowInviteModal(false)}
-                  className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={sendingInvite}
-                  className="flex-1 px-4 py-2.5 bg-[#4D7CFE] text-white rounded-lg text-sm font-semibold hover:bg-[#3D6CED] transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
-                >
+                <button type="button" onClick={() => setShowInviteModal(false)} className="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer">Cancel</button>
+                <button type="submit" disabled={sendingInvite} className="flex-1 px-4 py-2.5 bg-[#4D7CFE] text-white rounded-lg text-sm font-semibold hover:bg-[#3D6CED] transition-colors disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer">
                   {sendingInvite ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
                   {sendingInvite ? "Sending..." : "Send Invite"}
                 </button>
@@ -380,7 +293,6 @@ const CPAManagement = () => {
           </div>
         </div>
       )}
-
       <Toaster position="top-right" />
     </div>
   );

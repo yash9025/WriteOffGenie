@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { 
-  doc, getDoc, collection, query, where, getDocs, updateDoc
+  doc, getDoc, collection, query, where, getDocs, updateDoc, onSnapshot 
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { db } from "../../services/firebase";
@@ -12,7 +12,8 @@ import {
 
 // --- LEVEL 3: CLIENT ITEM (The Leaf) ---
 const ClientItem = ({ client, isLast }) => {
-  const isSubscribed = client.isActive || false;
+  // Logic: Consider active if they have revenue in the ledger
+  const isSubscribed = client.isActive || client.totalRevenue > 0;
 
   return (
     <div className="relative flex items-center gap-3 p-3 ml-6 hover:bg-slate-50 transition-colors rounded-lg group">
@@ -176,136 +177,121 @@ const AgentDetail = () => {
   useEffect(() => {
     if (!id) return;
     
-    // 1. Fetch Agent Profile
-    const fetchAgent = async () => {
-        try {
-            const agentDoc = await getDoc(doc(db, "Partners", id));
-            if (!agentDoc.exists()) {
-                toast.error("Agent not found");
-                navigate("/admin/agents");
-                return;
-            }
-            setAgent({ id: agentDoc.id, ...agentDoc.data() });
+    // Listen to Transactions (The heartbeat of the system)
+    // This allows the dashboard to update instantly when a new sale happens.
+    const unsubTxns = onSnapshot(
+        query(collection(db, "Transactions"), where("agentId", "==", id), where("status", "==", "completed")), 
+        async (txnsSnap) => {
+            try {
+                // Fetch Static/Semi-static data (Agent Profile, CPAs, Users)
+                // We fetch Users list to get names for the tree view
+                const [agentDoc, cpasSnap, usersSnap] = await Promise.all([
+                    getDoc(doc(db, "Partners", id)),
+                    getDocs(query(collection(db, "Partners"), where("referredBy", "==", id), where("role", "==", "cpa"))),
+                    getDocs(collection(db, "user"))
+                ]);
 
-            // Pricing lookup table
-            const PLAN_PRICES = {
-                'writeoffgenie-premium-month': 25.00,
-                'com.writeoffgenie.premium.monthly': 25.00,
-                'writeoffgenie-pro-month': 15.00,
-                'com.writeoffgenie.pro.monthly': 15.00,
-                'writeoffgenie-premium-year': 239.99,
-                'com.writeoffgenie.premium.yearly': 239.99,
-                'writeoffgenie-pro-year': 143.99,
-                'com.writeoffgenie.pro.yearly': 143.99,
-            };
-            const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
-            const now = new Date();
-
-            // 2. Fetch Network Tree (CPAs -> Users with Subscriptions)
-            const cpasQuery = query(
-                collection(db, "Partners"),
-                where("referredBy", "==", id),
-                where("role", "==", "cpa")
-            );
-            const cpasSnap = await getDocs(cpasQuery);
-            
-            const cpasData = [];
-            let totalRevenue = 0;
-            let totalCPACommissions = 0;
-            let activeClients = 0;
-
-            for (const cpaDoc of cpasSnap.docs) {
-                const cpaData = { id: cpaDoc.id, ...cpaDoc.data() };
-                const cpaCommissionRate = (cpaData.commissionRate || 10) / 100;
-                const cpaReferralCode = cpaData.referralCode;
-                
-                if (!cpaReferralCode) {
-                    cpaData.clients = [];
-                    cpasData.push(cpaData);
-                    continue;
+                if (!agentDoc.exists()) {
+                    toast.error("Agent not found");
+                    navigate("/admin/agents");
+                    return;
                 }
+
+                const agentData = { id: agentDoc.id, ...agentDoc.data() };
+                setAgent(agentData);
+
+                // --- DATA PROCESSING (Ledger Based) ---
                 
-                // Get users who have this CPA's referral code
-                const usersQuery = query(collection(db, "user"), where("referral_code", "==", cpaReferralCode));
-                const usersSnap = await getDocs(usersQuery);
-                const clientsData = [];
-                
-                for (const userDoc of usersSnap.docs) {
-                    const userId = userDoc.id;
-                    const userData = userDoc.data();
+                // 1. Prepare User Map for quick name lookup
+                const userMap = {};
+                usersSnap.docs.forEach(u => userMap[u.id] = u.data());
+
+                // 2. Prepare CPA Map
+                const cpasMap = {};
+                const cpasList = cpasSnap.docs.map(doc => {
+                    const data = { id: doc.id, ...doc.data(), clients: [] };
+                    cpasMap[doc.id] = data;
+                    return data;
+                });
+
+                // 3. Aggregate Transactions
+                let totalRevenue = 0;
+                let totalCPACommissions = 0;
+                let totalAgentCommissions = 0;
+                const uniqueClientsSet = new Set();
+
+                // Temp storage for client aggregation per CPA
+                // Map<cpaId, Map<userId, {totalRevenue, isActive}>>
+                const cpaClientTracker = {};
+
+                txnsSnap.docs.forEach(doc => {
+                    const txn = doc.data();
                     
-                    // Fetch all subscriptions for this user
-                    const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
-                    
-                    let userTotalRevenue = 0;
-                    let userHasActiveSubscription = false;
-                    const subscriptions = [];
-                    
-                    for (const subDoc of subsSnap.docs) {
-                        const subData = subDoc.data();
-                        const price = getPlanPrice(subData.planname);
-                        
-                        // Add to cumulative revenue
-                        userTotalRevenue += price;
-                        subscriptions.push({ ...subData, price });
-                        
-                        // Check if this subscription is active
-                        const expirationDate = subData.expiration_date?.toDate();
-                        if (subData.status === 'active' && expirationDate && expirationDate > now) {
-                            userHasActiveSubscription = true;
+                    // Stats Aggregation
+                    totalRevenue += Number(txn.amountPaid || 0);
+                    totalCPACommissions += Number(txn.cpaEarnings || 0);
+                    totalAgentCommissions += Number(txn.agentEarnings || 0);
+                    uniqueClientsSet.add(txn.userId);
+
+                    // Tree Construction Data
+                    const cpaId = txn.cpaId;
+                    const userId = txn.userId;
+
+                    if (cpaId && cpasMap[cpaId]) {
+                        if (!cpaClientTracker[cpaId]) cpaClientTracker[cpaId] = {};
+                        if (!cpaClientTracker[cpaId][userId]) {
+                            cpaClientTracker[cpaId][userId] = { 
+                                id: userId, 
+                                totalRevenue: 0, 
+                                isActive: true 
+                            };
                         }
+                        cpaClientTracker[cpaId][userId].totalRevenue += Number(txn.amountPaid || 0);
                     }
-                    
-                    // Add client with cumulative data
-                    clientsData.push({
-                        id: userId,
-                        ...userData,
-                        subscriptions,
-                        totalRevenue: userTotalRevenue,
-                        isActive: userHasActiveSubscription
+                });
+
+                // 4. Populate CPA Clients Array for the Tree
+                cpasList.forEach(cpa => {
+                    const clientsObj = cpaClientTracker[cpa.id] || {};
+                    const clientArray = Object.values(clientsObj).map(clientData => {
+                        const userProfile = userMap[clientData.id] || {};
+                        return {
+                            ...clientData,
+                            display_name: userProfile.displayName || userProfile.display_name || userProfile.name || "Unknown",
+                            email: userProfile.email || "No Email"
+                        };
                     });
-                    
-                    // Add to totals
-                    totalRevenue += userTotalRevenue;
-                    const cpaCommission = userTotalRevenue * cpaCommissionRate;
-                    totalCPACommissions += cpaCommission;
-                    
-                    if (userHasActiveSubscription) {
-                        activeClients++;
-                    }
-                }
+                    cpa.clients = clientArray;
+                });
+
+                setCPAs(cpasList);
+
+                // 5. Calculate Net Profit & Earnings using verified formula
+                const commRate = (agentData.commissionPercentage || 15) / 100;
+                const maintCost = agentData.maintenanceCostPerUser || 6.00;
+                const activeClientCount = uniqueClientsSet.size;
                 
-                cpaData.clients = clientsData;
-                cpasData.push(cpaData);
+                // Net Profit = (Rev - CPA_Paid) - (ActiveUsers * Maint)
+                const netProfitCalc = (totalRevenue - totalCPACommissions) - (activeClientCount * maintCost);
+
+                setEarnings({
+                    totalRevenue,
+                    totalCPACommissions,
+                    activeClients: activeClientCount,
+                    netProfit: netProfitCalc,
+                    agentCommission: totalAgentCommissions // Use ledger value for absolute accuracy
+                });
+
+                setLoading(false);
+
+            } catch (error) {
+                console.error("Error updating agent details:", error);
+                setLoading(false);
             }
-            setCPAs(cpasData);
-
-            // Calculate agent earnings using new formula
-            const agentData = { id: agentDoc.id, ...agentDoc.data() };
-            const commissionRate = (agentData.commissionPercentage || 15) / 100;
-            const maintenanceCost = agentData.maintenanceCostPerUser || 6.00;
-            
-            const netRevenue = totalRevenue - totalCPACommissions;
-            const maintenanceCosts = activeClients * maintenanceCost;
-            const netProfit = netRevenue - maintenanceCosts;
-            const agentCommission = Math.max(0, netProfit * commissionRate);
-
-            setEarnings({
-              totalRevenue,
-              totalCPACommissions,
-              activeClients,
-              netProfit,
-              agentCommission
-            });
-
-            setLoading(false);
-        } catch (error) {
-            console.error("Error loading agent:", error);
-            setLoading(false);
         }
-    };
+    );
 
-    fetchAgent();
+    return () => unsubTxns();
   }, [id, navigate]);
 
   const toggleCPA = (cpaId) => {
@@ -335,27 +321,15 @@ const AgentDetail = () => {
         maintenanceCostPerUser: parseFloat(editForm.maintenanceCostPerUser)
       });
 
-      // Update local state
+      // Optimistic Update
       setAgent(prev => ({
         ...prev,
         commissionPercentage: parseFloat(editForm.commissionPercentage),
         maintenanceCostPerUser: parseFloat(editForm.maintenanceCostPerUser)
       }));
 
-      // Recalculate earnings
-      const commissionRate = parseFloat(editForm.commissionPercentage) / 100;
-      const maintenanceCost = parseFloat(editForm.maintenanceCostPerUser);
-      const netRevenue = earnings.totalRevenue - earnings.totalCPACommissions;
-      const maintenanceCosts = earnings.activeClients * maintenanceCost;
-      const netProfit = netRevenue - maintenanceCosts;
-      const agentCommission = Math.max(0, netProfit * commissionRate);
-
-      setEarnings(prev => ({
-        ...prev,
-        netProfit,
-        agentCommission
-      }));
-
+      // Note: The Real-time listener will catch the DB change and re-run calculations automatically.
+      
       toast.success("Settings updated successfully!", { id: toastId });
       setShowEditModal(false);
     } catch (error) {
@@ -372,18 +346,14 @@ const AgentDetail = () => {
      const fn = httpsCallable(getFunctions(), 'toggleCAStatus'); 
 
      toast.promise(fn({ targetUserId: id, action }), {
-        loading: 'Updating status...',
-        success: `Agent ${action === 'activate' ? 'Activated' : 'Suspended'} successfully!`,
-        error: (err) => `Failed: ${err.message}`
+       loading: 'Updating status...',
+       success: `Agent ${action === 'activate' ? 'Activated' : 'Suspended'} successfully!`,
+       error: (err) => `Failed: ${err.message}`
      }).finally(() => {
-        setProcessing(false);
-        setShowStatusModal(false);
-        setAgent(prev => ({ ...prev, status: action === 'activate' ? 'active' : 'suspended' }));
+       setProcessing(false);
+       setShowStatusModal(false);
+       setAgent(prev => ({ ...prev, status: action === 'activate' ? 'active' : 'suspended' }));
      });
-  };
-
-  const formatDate = (date) => {
-    return date ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A';
   };
 
   const formatCurrency = (val) => `$${(val || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -464,15 +434,15 @@ const AgentDetail = () => {
                 <div>
                   <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Commission Settings</p>
                   <div className="flex items-center gap-4 mt-2">
-                     <div>
-                       <p className="text-xs text-slate-500">Commission Rate</p>
-                       <p className="text-2xl font-black text-[#4D7CFE]">{agent.commissionPercentage || 15}%</p>
-                     </div>
-                     <div className="w-px h-12 bg-slate-200"></div>
-                     <div>
-                       <p className="text-xs text-slate-500">Maintenance Cost per User</p>
-                       <p className="text-2xl font-black text-slate-700">{formatCurrency(agent.maintenanceCostPerUser || 6.00)}</p>
-                     </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Commission Rate</p>
+                        <p className="text-2xl font-black text-[#4D7CFE]">{agent.commissionPercentage || 15}%</p>
+                      </div>
+                      <div className="w-px h-12 bg-slate-200"></div>
+                      <div>
+                        <p className="text-xs text-slate-500">Maintenance Cost per User</p>
+                        <p className="text-2xl font-black text-slate-700">{formatCurrency(agent.maintenanceCostPerUser || 6.00)}</p>
+                      </div>
                   </div>
                 </div>
                 <button 
@@ -506,37 +476,37 @@ const AgentDetail = () => {
               </div>
               
               <div className="space-y-3">
-                 <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                  <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
                     <div className="flex justify-between items-center">
                       <p className="text-xs text-slate-500 font-medium">Total Revenue</p>
                       <p className="text-lg font-black text-slate-900">{formatCurrency(earnings.totalRevenue)}</p>
                     </div>
-                 </div>
+                  </div>
 
-                 <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                  <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
                     <div className="flex justify-between items-center">
                       <p className="text-xs text-red-500 font-medium">- CPA Commissions</p>
                       <p className="text-lg font-black text-red-600">-{formatCurrency(earnings.totalCPACommissions)}</p>
                     </div>
-                 </div>
+                  </div>
 
-                 <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                  <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
                     <div className="flex justify-between items-center">
                       <p className="text-xs text-red-500 font-medium">- Maintenance Costs ({earnings.activeClients} × {formatCurrency(agent.maintenanceCostPerUser || 6.00)})</p>
                       <p className="text-lg font-black text-red-600">-{formatCurrency(earnings.activeClients * (agent.maintenanceCostPerUser || 6.00))}</p>
                     </div>
-                 </div>
+                  </div>
 
-                 <div className="h-px bg-slate-200"></div>
+                  <div className="h-px bg-slate-200"></div>
 
-                 <div className="p-4 rounded-xl border-2 border-blue-100 bg-blue-50/50">
+                  <div className="p-4 rounded-xl border-2 border-blue-100 bg-blue-50/50">
                     <div className="flex justify-between items-center">
                       <p className="text-xs text-blue-600 font-bold uppercase">= Net Profit</p>
                       <p className="text-lg font-black text-blue-900">{formatCurrency(earnings.netProfit)}</p>
                     </div>
-                 </div>
+                  </div>
 
-                 <div className="p-5 rounded-xl border-2 border-emerald-200 bg-emerald-50">
+                  <div className="p-5 rounded-xl border-2 border-emerald-200 bg-emerald-50">
                     <div className="flex justify-between items-center">
                       <div>
                         <p className="text-xs text-emerald-600 font-bold uppercase">Agent Commission</p>
@@ -544,7 +514,7 @@ const AgentDetail = () => {
                       </div>
                       <p className="text-2xl font-black text-emerald-900">{formatCurrency(earnings.agentCommission)}</p>
                     </div>
-                 </div>
+                  </div>
               </div>
             </div>
 

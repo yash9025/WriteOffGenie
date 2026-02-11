@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { collection, query, where, onSnapshot, doc, getDoc, getDocs } from "firebase/firestore";
+import { collection, query, where, onSnapshot, getDocs, doc, getDoc } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { useNavigate } from "react-router-dom";
 import { db } from "../../services/firebase";
@@ -11,23 +11,9 @@ import StatCard from "../../components/common/StatCard";
 
 export default function CAManagement() {
   const [cpas, setCPAs] = useState([]);
-  const [usersData, setUsersData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(null);
   const [filter, setFilter] = useState("");
-  
-  // Pricing lookup
-  const PLAN_PRICES = {
-    'writeoffgenie-premium-month': 25.00,
-    'com.writeoffgenie.premium.monthly': 25.00,
-    'writeoffgenie-pro-month': 15.00,
-    'com.writeoffgenie.pro.monthly': 15.00,
-    'writeoffgenie-premium-year': 239.99,
-    'com.writeoffgenie.premium.yearly': 239.99,
-    'writeoffgenie-pro-year': 143.99,
-    'com.writeoffgenie.pro.yearly': 143.99,
-  };
-  const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
   
   // Invite Modal State
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -41,94 +27,97 @@ export default function CAManagement() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // 1. Listen to CPAs list in real-time
     const q = query(collection(db, "Partners"), where("role", "==", "cpa"));
+    
     const unsub = onSnapshot(q, async (snapshot) => {
-      const cpaData = [];
-      const allUsersData = [];
-      
-      for (const docSnap of snapshot.docs) {
-        const data = { id: docSnap.id, ...docSnap.data() };
-        
-        // Fetch referrer name if exists
-        if (data.referredBy) {
-          try {
-            const referrerDoc = await getDoc(doc(db, "Partners", data.referredBy));
-            if (referrerDoc.exists()) {
-              const referrerData = referrerDoc.data();
-              data.referrerName = referrerData.displayName || referrerData.name || "Unknown";
-              data.referrerRole = referrerData.role;
-            } else {
-              data.referrerName = "Direct";
-              data.referrerRole = null;
+      try {
+        // 2. Fetch Transactions (Ledger) for financial accuracy
+        // We fetch all commission transactions to aggregate revenue per CPA
+        const txnsQuery = query(collection(db, "Transactions"), where("type", "==", "commission"), where("status", "==", "completed"));
+        const [txnsSnap, allPartnersSnap] = await Promise.all([
+            getDocs(txnsQuery),
+            getDocs(collection(db, "Partners")) // To resolve Referrer Names
+        ]);
+
+        // Create a map for quick partner lookup (Referrer Name)
+        const partnerMap = {};
+        allPartnersSnap.docs.forEach(doc => partnerMap[doc.id] = doc.data());
+
+        // 3. Aggregate Ledger Data per CPA
+        const cpaStats = {}; 
+        // Structure: { cpaId: { revenue: 0, earnings: 0, activeClients: Set() } }
+
+        txnsSnap.docs.forEach(doc => {
+            const txn = doc.data();
+            const cpaId = txn.cpaId;
+            if (!cpaId) return;
+
+            if (!cpaStats[cpaId]) {
+                cpaStats[cpaId] = { revenue: 0, earnings: 0, activeClients: new Set() };
             }
-          } catch (err) {
-            console.error("Error fetching referrer:", err);
-            data.referrerName = "Direct";
-            data.referrerRole = null;
-          }
-        } else {
-          data.referrerName = "Direct";
-          data.referrerRole = null;
-        }
-        
-        // Fetch users with this CPA's referral code
-        const cpaReferralCode = data.referralCode;
-        if (cpaReferralCode) {
-          const usersQuery = query(collection(db, "user"), where("referral_code", "==", cpaReferralCode));
-          const usersSnap = await getDocs(usersQuery);
-          
-          let totalRevenue = 0;
-          let activeClients = 0;
-          const now = new Date();
-          
-          for (const userDoc of usersSnap.docs) {
-            const userId = userDoc.id;
+
+            const amount = Number(txn.amountPaid || 0);
+            const earnings = Number(txn.cpaEarnings || 0);
+
+            cpaStats[cpaId].revenue += amount;
+            cpaStats[cpaId].earnings += earnings;
+            cpaStats[cpaId].activeClients.add(txn.userId);
+        });
+
+        // 4. Merge CPA Profile with Ledger Stats
+        const cpaData = snapshot.docs.map(docSnap => {
+            const data = docSnap.data();
+            const stats = cpaStats[docSnap.id] || { revenue: 0, earnings: 0, activeClients: new Set() };
             
-            // Fetch subscriptions
-            const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
-            let userIsActive = false;
-            
-            for (const subDoc of subsSnap.docs) {
-              const subData = subDoc.data();
-              const price = getPlanPrice(subData.planname);
-              totalRevenue += price;
-              
-              let expirationDate = subData.expiration_date;
-              if (expirationDate?.toDate) expirationDate = expirationDate.toDate();
-              else if (typeof expirationDate === 'string') expirationDate = new Date(expirationDate);
-              
-              if (subData.status === 'active' && expirationDate && expirationDate > now) {
-                userIsActive = true;
-              }
-              
-              // Store for stats calculation
-              allUsersData.push({
-                cpaId: data.id,
-                cpaCommissionRate: data.commissionRate || 10,
-                amount: price
-              });
+            // Resolve Referrer Name
+            let referrerName = "Direct";
+            let referrerRole = null;
+            if (data.referredBy && partnerMap[data.referredBy]) {
+                const ref = partnerMap[data.referredBy];
+                referrerName = ref.displayName || ref.name || "Unknown";
+                referrerRole = ref.role;
             }
-            
-            if (userIsActive) activeClients++;
-          }
-          
-          data.calculatedStats = {
-            totalRevenue,
-            activeClients,
-            totalClients: usersSnap.size
-          };
-        }
+
+            return {
+                id: docSnap.id,
+                ...data,
+                referrerName,
+                referrerRole,
+                calculatedStats: {
+                    totalRevenue: stats.revenue,
+                    totalEarnings: stats.earnings,
+                    activeClients: stats.activeClients.size
+                }
+            };
+        });
+
+        // Sort by joined date (newest first)
+        cpaData.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
         
-        cpaData.push(data);
+        setCPAs(cpaData);
+        setLoading(false);
+
+      } catch (err) {
+        console.error("Error loading CPA ledger data:", err);
+        toast.error("Failed to load CPA data");
+        setLoading(false);
       }
-      
-      setCPAs(cpaData);
-      setUsersData(allUsersData);
-      setLoading(false);
     });
 
     return () => unsub();
   }, []);
+
+  // Global Stats for Top Cards
+  const globalStats = useMemo(() => {
+    const totalRevenue = cpas.reduce((sum, cpa) => sum + (cpa.calculatedStats?.totalRevenue || 0), 0);
+    const totalCommission = cpas.reduce((sum, cpa) => sum + (cpa.calculatedStats?.totalEarnings || 0), 0);
+    return {
+        totalRevenue,
+        totalCommission,
+        netRevenue: totalRevenue - totalCommission
+    };
+  }, [cpas]);
 
   // Handle sending CPA invite
   const handleSendInvite = async (e) => {
@@ -153,7 +142,6 @@ export default function CAManagement() {
     }
   };
 
-
   const toggleStatus = async (id, currentStatus) => {
     const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
     
@@ -164,7 +152,7 @@ export default function CAManagement() {
 
     try {
       const fn = httpsCallable(getFunctions(), 'toggleCAStatus');
-      await fn({ targetUserId: id, action: newStatus }); // Sends 'inactive' or 'active'
+      await fn({ targetUserId: id, action: newStatus }); 
       toast.success(`Account marked as ${newStatus}`, { id: toastId });
     } catch (e) { 
         console.error(e);
@@ -178,33 +166,17 @@ export default function CAManagement() {
     navigate(`/admin/cpas/${partnerId}`);
   };
 
-  // Calculate stats from all CPAs
-  const stats = useMemo(() => {
-    let totalRevenue = 0;
-    let totalCommission = 0;
-
-    usersData.forEach(item => {
-      totalRevenue += item.amount || 0;
-      const commissionRate = (item.cpaCommissionRate || 10) / 100;
-      totalCommission += (item.amount || 0) * commissionRate;
-    });
-
-    const netRevenue = totalRevenue - totalCommission;
-
-    return { totalRevenue, totalCommission, netRevenue };
-  }, [usersData]);
-
-  const formatCurrency = (value) => `$${value.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+  const formatCurrency = (value) => `$${(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
 
   const filtered = cpas.filter(cpa => 
-    cpa.displayName?.toLowerCase().includes(filter) || 
-    cpa.email?.toLowerCase().includes(filter) ||
-    cpa.referrerName?.toLowerCase().includes(filter)
+    cpa.displayName?.toLowerCase().includes(filter.toLowerCase()) || 
+    cpa.email?.toLowerCase().includes(filter.toLowerCase()) ||
+    cpa.referrerName?.toLowerCase().includes(filter.toLowerCase())
   );
 
   const formatDate = (timestamp) => {
     if (!timestamp) return "N/A";
-    return timestamp.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return new Date(timestamp.seconds * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
   if (loading) return (
@@ -236,19 +208,19 @@ export default function CAManagement() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <StatCard 
           title="Total Revenue from CPAs" 
-          value={formatCurrency(stats.totalRevenue)} 
+          value={formatCurrency(globalStats.totalRevenue)} 
           description="Revenue generated from all CPAs" 
           icon={DollarSign} 
         />
         <StatCard 
           title="Total Commissions" 
-          value={formatCurrency(stats.totalCommission)} 
+          value={formatCurrency(globalStats.totalCommission)} 
           description="Total commission paid to CPAs" 
           icon={TrendingUp} 
         />
         <StatCard 
           title="Net Revenue" 
-          value={formatCurrency(stats.netRevenue)} 
+          value={formatCurrency(globalStats.netRevenue)} 
           description="After CPA commissions" 
           icon={Wallet} 
         />
@@ -333,6 +305,18 @@ export default function CAManagement() {
       {/* --- TABLE CONTAINER --- */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
         
+        {/* Search Bar (Optional addition for UX) */}
+        <div className="p-4 border-b border-slate-100 flex items-center gap-3">
+            <Search className="text-slate-400" size={20} />
+            <input 
+                type="text" 
+                placeholder="Search CPAs..." 
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                className="w-full outline-none text-sm text-slate-700 placeholder:text-slate-400"
+            />
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead className="bg-white border-b border-slate-100">
@@ -341,7 +325,7 @@ export default function CAManagement() {
                 <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Email</th>
                 <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Referred By</th>
                 <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Joined On</th>
-                <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Referred Users</th>
+                <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Active Clients</th>
                 <th className="py-5 px-6 text-xs font-medium text-[#9499A1]">Total Earnings</th>
                 <th className="py-5 px-6 text-xs font-medium text-[#9499A1] text-center">Status</th>
                 <th className="py-5 px-6 text-xs font-medium text-[#9499A1] text-right">Actions</th>
@@ -366,7 +350,7 @@ export default function CAManagement() {
                      {/* Referred By */}
                      <td className="py-5 px-6">
                         <span className={`text-sm font-medium ${cpa.referrerRole === 'agent' ? 'text-[#4D7CFE]' : 'text-[#9499A1]'}`}>
-                          {cpa.referrerName || "Direct"}
+                          {cpa.referrerName}
                         </span>
                      </td>
 
@@ -375,14 +359,16 @@ export default function CAManagement() {
                         <span className="text-sm text-[#9499A1]">{formatDate(cpa.createdAt)}</span>
                      </td>
 
-                     {/* Referred Users */}
+                     {/* Active Clients (From Ledger) */}
                      <td className="py-5 px-6">
-                        <span className="text-sm font-medium text-[#111111] ml-2">{cpa.stats?.totalReferred || 0}</span>
+                        <span className="text-sm font-medium text-[#111111] ml-2">
+                            {cpa.calculatedStats?.activeClients || 0}
+                        </span>
                      </td>
 
-                     {/* Earnings */}
+                     {/* Earnings (From Ledger) */}
                      <td className="py-5 px-6">
-                        <span className="text-sm font-bold text-[#111111]">${(cpa.stats?.totalEarnings || 0).toLocaleString()}</span>
+                        <span className="text-sm font-bold text-[#111111]">{formatCurrency(cpa.calculatedStats?.totalEarnings)}</span>
                      </td>
 
                      {/* Status Badge */}
@@ -428,8 +414,8 @@ export default function CAManagement() {
                 <div className="w-20 h-20 bg-[#4D7CFE1A] rounded-full flex items-center justify-center mb-4">
                     <Search size={32} className="text-[#4D7CFE]" />
                 </div>
-                <h3 className="text-[#111111] font-bold text-lg">No CPA accounts yet</h3>
-                <p className="text-[#9499A1] text-sm mt-1">CPA accounts will appear here once they register.</p>
+                <h3 className="text-[#111111] font-bold text-lg">No CPA accounts found</h3>
+                <p className="text-sm text-[#9499A1] mt-1">Try adjusting your search filters.</p>
             </div>
         )}
       </div>
