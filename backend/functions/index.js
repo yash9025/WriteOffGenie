@@ -20,7 +20,7 @@ export { sendCPAInvite, sendAgentInvite, verifyInvite } from "./controllers/invi
 export { getAgentStats, getAgentCPAs, processAgentCommission, registerAgent } from "./controllers/agentController.js";
 
 // 3. Export Firestore Triggers
-// REMOVED onSubscriptionCreatedTrigger to prevent double-counting
+// This pulls the updated logic from the file above
 export { 
     onUserCreatedTrigger,
     handleSubscriptionEarnings 

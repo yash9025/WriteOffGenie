@@ -6,19 +6,6 @@ import { Loader2, ChevronDown } from "../../components/Icons";
 import toast, { Toaster } from "react-hot-toast";
 import {RevenueIcon, SubscriptionIcon, CalendarIconLarge, EmptyPerformanceIllustration as EmptyIllustration } from "../../components/Icons";
 
-// Pricing lookup
-const PLAN_PRICES = {
-  'writeoffgenie-premium-month': 25.00,
-  'com.writeoffgenie.premium.monthly': 25.00,
-  'writeoffgenie-pro-month': 15.00,
-  'com.writeoffgenie.pro.monthly': 15.00,
-  'writeoffgenie-premium-year': 239.99,
-  'com.writeoffgenie.premium.yearly': 239.99,
-  'writeoffgenie-pro-year': 143.99,
-  'com.writeoffgenie.pro.yearly': 143.99,
-};
-const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
-
 // --- STAT CARD ---
 const StatCard = ({ icon: Icon, label, value, description }) => (
   <div className="bg-white border border-[#E3E6EA] rounded-2xl p-5 flex flex-col gap-4 flex-1 min-w-0 shadow-sm">
@@ -37,101 +24,101 @@ const StatCard = ({ icon: Icon, label, value, description }) => (
 
 export default function Performance() {
   const { user } = useAuth();
-  const [clients, setClients] = useState([]);
+  
+  // Data State
+  const [ledgerData, setLedgerData] = useState([]);
+  const [userMap, setUserMap] = useState({});
+  const [partnerStats, setPartnerStats] = useState({});
+  
+  // UI State
   const [commissionRate, setCommissionRate] = useState(10);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState('month');
   const [filterOpen, setFilterOpen] = useState(false);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user?.uid) return;
 
-    let unsubProfile = null;
+    // 1. Listen to Partner Stats (Real-time Commission Rate & Totals)
+    const unsubPartner = onSnapshot(doc(db, "Partners", user.uid), async (docSnap) => {
+      if (docSnap.exists()) {
+        const pData = docSnap.data();
+        setCommissionRate(pData.commissionRate || 10);
+        setPartnerStats(pData.stats || {});
 
-    const fetchData = async () => {
-      // Get partner's commission rate and referral code
-      unsubProfile = onSnapshot(doc(db, "Partners", user.uid), async (docSnap) => {
-        if (docSnap.exists()) {
-          const partnerData = docSnap.data();
-          setCommissionRate(partnerData.commissionRate || 10);
-          
-          // Fetch users with this CPA's referral code
-          const cpaReferralCode = partnerData.referralCode;
-          if (!cpaReferralCode) {
-            setClients([]);
-            setLoading(false);
-            return;
-          }
-
-          try {
-            const now = new Date();
-            const q = query(collection(db, "user"), where("referral_code", "==", cpaReferralCode));
-            const querySnapshot = await getDocs(q);
-            const subscriptionData = [];
-
-            for (const userDoc of querySnapshot.docs) {
-              const userId = userDoc.id;
-              const userData = userDoc.data();
-
-              // Fetch all subscriptions for this user
-              const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
-
-              for (const subDoc of subsSnap.docs) {
-                const subData = subDoc.data();
-                const price = getPlanPrice(subData.planname);
-                
-                // Parse dates
-                let purchaseDate = subData.purchase_date || subData.purchse_date || subData.created_Time;
-                if (purchaseDate?.toDate) purchaseDate = purchaseDate.toDate();
-                else if (typeof purchaseDate === 'string') purchaseDate = new Date(purchaseDate);
-                else purchaseDate = new Date();
-
-                let expirationDate = subData.expiration_date;
-                if (expirationDate?.toDate) expirationDate = expirationDate.toDate();
-                else if (typeof expirationDate === 'string') expirationDate = new Date(expirationDate);
-
-                const isActive = subData.status === 'active' && expirationDate && expirationDate > now;
-
-                subscriptionData.push({
-                  id: subDoc.id,
-                  email: userData.email || '',
-                  name: userData.display_name || userData.name || 'Unknown',
-                  planType: subData.planname?.replace('writeoffgenie-', '').replace('com.writeoffgenie.', '').replace('.monthly', '').replace('.yearly', '') || 'Unknown',
-                  amountPaid: price,
-                  activatedAt: purchaseDate,
-                  subscriptionStatus: isActive ? 'active' : 'inactive'
+        // 2. Fetch User Details Map (Once, to populate names/emails in table)
+        if (pData.referralCode) {
+            const usersQ = query(collection(db, "user"), where("referral_code", "==", pData.referralCode));
+            getDocs(usersQ).then((snap) => {
+                const map = {};
+                snap.forEach(uDoc => {
+                    const u = uDoc.data();
+                    map[uDoc.id] = {
+                        name: u.display_name || u.name || "Unknown",
+                        email: u.email || ""
+                    };
                 });
-              }
-            }
-
-            setClients(subscriptionData);
-          } catch (error) {
-            console.error("Error fetching performance data:", error);
-          }
-          
-          setLoading(false);
+                setUserMap(map);
+            });
         }
-      });
-    };
+      }
+    });
 
-    fetchData();
+    // 3. Listen to Transactions Ledger (The Source of Truth)
+    const txnsQuery = query(
+        collection(db, "Transactions"), 
+        where("cpaId", "==", user.uid), 
+        where("status", "==", "completed")
+    );
+
+    const unsubTxns = onSnapshot(txnsQuery, (snapshot) => {
+        try {
+            const txns = snapshot.docs.map(doc => {
+                const data = doc.data();
+                return {
+                    id: doc.id,
+                    ...data,
+                    // Normalize Timestamp
+                    createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date()
+                };
+            });
+            
+            // Sort by newest first
+            txns.sort((a, b) => b.createdAt - a.createdAt);
+            
+            setLedgerData(txns);
+            setLoading(false);
+        } catch (err) {
+            console.error("Ledger error:", err);
+            setLoading(false);
+        }
+    });
 
     return () => {
-      if (unsubProfile) unsubProfile();
+        unsubPartner();
+        unsubTxns();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
 
-  // Calculate commission dynamically based on partner's rate
-  const clientsWithCommission = useMemo(() => {
-    return clients.map(c => ({
-      ...c,
-      commission: (c.amountPaid || 0) * (commissionRate / 100)
-    }));
-  }, [clients, commissionRate]);
+  // --- MERGE DATA FOR TABLE ---
+  const tableRows = useMemo(() => {
+    return ledgerData.map(txn => {
+        const userInfo = userMap[txn.userId] || {};
+        return {
+            id: txn.id,
+            email: userInfo.email || "Loading...",
+            name: userInfo.name || "Unknown User",
+            planType: txn.plan?.replace('writeoffgenie-', '').replace('com.writeoffgenie.', '').replace('.monthly', '').replace('.yearly', '') || 'Unknown',
+            amountPaid: Number(txn.amountPaid || 0),
+            commission: Number(txn.cpaEarnings || 0),
+            activatedAt: txn.createdAt,
+            status: "Credited" // Ledger entries are always completed/credited
+        };
+    });
+  }, [ledgerData, userMap]);
 
-  // Filter Logic
-  const filteredClients = useMemo(() => {
+  // --- FILTERING ---
+  const filteredRows = useMemo(() => {
     const now = new Date();
     const startDate = new Date();
     
@@ -139,21 +126,18 @@ export default function Performance() {
     else if (timeRange === 'month') startDate.setMonth(now.getMonth() - 1);
     else if (timeRange === 'year') startDate.setFullYear(now.getFullYear() - 1);
     
-    return clientsWithCommission.filter(c => c.amountPaid > 0 && c.activatedAt >= startDate);
-  }, [clientsWithCommission, timeRange]);
+    return tableRows.filter(row => row.activatedAt >= startDate);
+  }, [tableRows, timeRange]);
 
-  // Stats Calculation
-  const totalEarnings = useMemo(() => {
-    return clientsWithCommission.filter(c => c.amountPaid > 0).reduce((sum, c) => sum + c.commission, 0);
-  }, [clientsWithCommission]);
+  // --- STATS CALCULATIONS ---
+  // 1. Total Earnings: Use Partner Stats if available (fastest), else sum ledger
+  const totalEarningsVal = partnerStats.totalEarnings ?? tableRows.reduce((acc, curr) => acc + curr.commission, 0);
+  
+  // 2. Period Earnings: Must calculate from filtered ledger
+  const periodEarningsVal = filteredRows.reduce((acc, curr) => acc + curr.commission, 0);
 
-  const thisMonthEarnings = useMemo(() => {
-    return filteredClients.reduce((sum, c) => sum + c.commission, 0);
-  }, [filteredClients]);
-
-  const activeSubscriptions = useMemo(() => {
-    return clientsWithCommission.filter(c => c.subscriptionStatus === 'active').length;
-  }, [clientsWithCommission]);
+  // 3. Active Subscribers: Unique UserIDs in the ledger
+  const activeSubscribersVal = new Set(ledgerData.map(t => t.userId)).size;
 
   const filterOptions = [
     { value: "week", label: "This week" },
@@ -168,16 +152,15 @@ export default function Performance() {
     </div>
   );
 
-  const earningsData = clientsWithCommission.filter(c => c.amountPaid > 0);
-
   return (
     <div className="flex flex-col gap-6 w-full max-w-full animate-in fade-in duration-500 pb-10">
+      <Toaster position="top-right" />
       
       {/* Header & Filter */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-[#111111] text-2xl font-bold tracking-tight">Earnings & Commission</h1>
-          <p className="text-[#9499A1] text-sm mt-1">View commission earned from your referred subscriptions</p>
+          <p className="text-[#9499A1] text-sm mt-1">Verified commission from transaction ledger</p>
         </div>
 
         <div className="flex items-center gap-3">
@@ -220,25 +203,25 @@ export default function Performance() {
         <StatCard 
           icon={RevenueIcon} 
           label="Total Earnings" 
-          value={`$${totalEarnings.toFixed(2)}`}
-          description="Total commission earned from all referrals"
+          value={`$${totalEarningsVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+          description="Total commission earned all-time"
         />
         <StatCard 
           icon={CalendarIconLarge} 
           label="Period Earnings" 
-          value={`$${thisMonthEarnings.toFixed(2)}`}
-          description="Commission earned in the selected period"
+          value={`$${periodEarningsVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}
+          description="Commission earned in selected period"
         />
         <StatCard 
           icon={SubscriptionIcon} 
           label="Active Subscriptions" 
-          value={activeSubscriptions}
-          description="Active subscriptions linked to your referrals"
+          value={activeSubscribersVal}
+          description="Unique paying users"
         />
       </div>
 
       {/* Table Section */}
-      {earningsData.length === 0 ? (
+      {tableRows.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 bg-white border border-[#E3E6EA] rounded-2xl">
           <EmptyIllustration />
           <div className="flex flex-col gap-2 items-center text-center mt-6">
@@ -263,11 +246,10 @@ export default function Performance() {
 
           {/* Table Rows */}
           <div className="flex flex-col gap-2">
-            {earningsData.map((item) => {
+            {filteredRows.map((item) => {
               const dateStr = item.activatedAt.toLocaleDateString('en-US', { 
                 month: 'short', day: 'numeric', year: 'numeric' 
               });
-              const isCredited = item.subscriptionStatus === 'active';
 
               return (
                 <div key={item.id} className="flex flex-col md:flex-row md:items-center justify-between p-3 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-[#E3E6EA]">
@@ -279,7 +261,7 @@ export default function Performance() {
 
                   <div className="w-full md:w-1/5 mb-2 md:mb-0 flex justify-between md:block">
                     <span className="md:hidden text-xs text-[#9499A1]">Plan:</span>
-                    <p className="text-[#111111] text-sm">{item.planType}</p>
+                    <p className="text-[#111111] text-sm capitalize">{item.planType}</p>
                   </div>
 
                   <div className="w-full md:w-1/6 mb-2 md:mb-0 flex justify-between md:block">
@@ -298,22 +280,23 @@ export default function Performance() {
                   </div>
 
                   <div className="w-full md:w-1/12 text-left md:text-right">
-                    <span className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${
-                      isCredited 
-                        ? "bg-[#ECFDF5] text-[#059669] border border-[#A7F3D0]" 
-                        : "bg-[#FFFBEB] text-[#D97706] border border-[#FDE68A]"
-                    }`}>
-                      {isCredited ? "Credited" : "Pending"}
+                    <span className="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide bg-[#ECFDF5] text-[#059669] border border-[#A7F3D0]">
+                      {item.status}
                     </span>
                   </div>
 
                 </div>
               );
             })}
+            
+            {filteredRows.length === 0 && (
+                <div className="text-center py-8 text-sm text-[#9499A1] italic">
+                    No transactions found for this period.
+                </div>
+            )}
           </div>
         </div>
       )}
-      <Toaster position="top-right" />
     </div>
   );
 }

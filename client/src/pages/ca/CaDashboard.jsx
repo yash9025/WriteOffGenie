@@ -34,6 +34,7 @@ function Dashboard() {
   const { searchQuery } = useSearch();
   const [profile, setProfile] = useState(null);
   const [referrals, setReferrals] = useState([]);
+  const [stats, setStats] = useState({ totalReferred: 0, totalEarnings: 0, activeSubs: 0 });
   const [copied, setCopied] = useState(false);
   const [dataLoading, setDataLoading] = useState(true);
   
@@ -44,111 +45,99 @@ function Dashboard() {
   useEffect(() => {
     if (authLoading || !user) return;
 
-    // Real-time listener for Partner Profile (Stats & Balance)
-    const unsubProfile = onSnapshot(doc(db, "Partners", user.uid), async (docSnap) => {
+    // 1. Listen to Partner Profile (Config & basic info)
+    const unsubProfile = onSnapshot(doc(db, "Partners", user.uid), (docSnap) => {
       if (docSnap.exists()) {
-          setProfile(docSnap.data());
+          const pData = docSnap.data();
+          setProfile(pData);
           
-          // Fetch referrals when profile loads
-          await fetchReferrals(docSnap.data().referralCode);
+          if (pData.referralCode) {
+              fetchRealTimeStats(pData.referralCode, user.uid);
+          } else {
+              setDataLoading(false);
+          }
       }
-      setDataLoading(false);
     });
 
-    // Fetch list of Referred Users from user collection
-    const fetchReferrals = async (cpaReferralCode) => {
-      try {
-        if (!cpaReferralCode) {
-          setReferrals([]);
-          return;
-        }
-        
-        // Pricing lookup
-        const PLAN_PRICES = {
-          'writeoffgenie-premium-month': 25.00,
-          'com.writeoffgenie.premium.monthly': 25.00,
-          'writeoffgenie-pro-month': 15.00,
-          'com.writeoffgenie.pro.monthly': 15.00,
-          'writeoffgenie-premium-year': 239.99,
-          'com.writeoffgenie.premium.yearly': 239.99,
-          'writeoffgenie-pro-year': 143.99,
-          'com.writeoffgenie.pro.yearly': 143.99,
-        };
-        const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
-        const now = new Date();
-        
-        // Get users with this CPA's referral code
-        const q = query(collection(db, "user"), where("referral_code", "==", cpaReferralCode));
-        const querySnapshot = await getDocs(q);
-        const usersData = [];
-        
-        for (const userDoc of querySnapshot.docs) {
-          const userId = userDoc.id;
-          const userData = userDoc.data();
-          
-          // Fetch all subscriptions for this user
-          const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
-          
-          let totalRevenue = 0;
-          let isActive = false;
-          const subscriptions = [];
-          
-          for (const subDoc of subsSnap.docs) {
-            const subData = subDoc.data();
-            const price = getPlanPrice(subData.planname);
-            totalRevenue += price;
-            subscriptions.push({ id: subDoc.id, ...subData, price });
-            
-            // Check active status - handle both Timestamp and Date objects
-            let expirationDate = subData.expiration_date;
-            if (expirationDate?.toDate) {
-              expirationDate = expirationDate.toDate();
-            } else if (typeof expirationDate === 'string') {
-              expirationDate = new Date(expirationDate);
-            }
-            
-            if (subData.status === 'active' && expirationDate && expirationDate > now) {
-              isActive = true;
-            }
-          }
-          
-          usersData.push({
-            id: userId,
-            name: userData.display_name || userData.name || 'Unknown',
-            email: userData.email || '',
-            phone: userData.phone || '',
-            referralCode: userData.referral_code || '',
-            subscriptions,
-            totalRevenue,
-            subscription: { status: isActive ? 'active' : 'inactive' },
-            createdAt: userData.created_time,
-            rawData: userData
-          });
-        }
-        
-        // Sort by newest first
-        usersData.sort((a, b) => {
-          const aTime = a.createdAt?.seconds || a.createdAt?.getTime?.() || 0;
-          const bTime = b.createdAt?.seconds || b.createdAt?.getTime?.() || 0;
-          return bTime - aTime;
-        });
-        
-        setReferrals(usersData);
-      } catch (err) { 
-        console.error("Error fetching referrals:", err);
-      }
-    };
-
     return () => unsubProfile();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, authLoading]);
 
-  // Derived Values
-  const totalReferred = profile?.stats?.totalReferred || 0;
-  const totalSubscribed = profile?.stats?.totalSubscribed || 0;
-  
-  // Construct the Referral Link for Display/Copying
-  // Uses the "Bridge Page" URL structure we built earlier
+  // --- REAL-TIME STATS FETCHING (The Fix) ---
+  const fetchRealTimeStats = (referralCode, cpaId) => {
+      // A. Listen to Users (Count Referrals)
+      const qUsers = query(collection(db, "user"), where("referral_code", "==", referralCode));
+      
+      const unsubUsers = onSnapshot(qUsers, (snap) => {
+          const usersData = snap.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data(),
+              // We'll hydrate the subscription/commission info in the next step
+              totalRevenue: 0, 
+              subscription: { status: 'inactive' } 
+          }));
+          
+          setStats(prev => ({ ...prev, totalReferred: snap.size }));
+          
+          // Trigger the detailed fetch for table & earnings
+          fetchLedgerAndHydrate(cpaId, usersData);
+      });
+
+      return () => unsubUsers();
+  };
+
+  // B. Fetch Ledger for Earnings & Active Status
+  const fetchLedgerAndHydrate = async (cpaId, usersList) => {
+      try {
+          const qTxns = query(collection(db, "Transactions"), where("cpaId", "==", cpaId), where("status", "==", "completed"));
+          const txnsSnap = await getDocs(qTxns);
+          
+          let earningsSum = 0;
+          const activeUserIds = new Set();
+          const userRevenueMap = {}; // userId -> totalRevenue
+
+          txnsSnap.docs.forEach(doc => {
+              const txn = doc.data();
+              earningsSum += Number(txn.cpaEarnings || 0);
+              activeUserIds.add(txn.userId);
+              
+              if (!userRevenueMap[txn.userId]) userRevenueMap[txn.userId] = 0;
+              userRevenueMap[txn.userId] += Number(txn.amountPaid || 0);
+          });
+
+          // Hydrate the user list for the table
+          const hydratedUsers = usersList.map(u => ({
+              ...u,
+              totalRevenue: userRevenueMap[u.id] || 0,
+              subscription: { 
+                  status: activeUserIds.has(u.id) ? 'active' : 'inactive',
+                  planType: activeUserIds.has(u.id) ? 'Premium' : 'Free' // Simplification
+              },
+              // Fix createdAt sort issue
+              createdAt: u.created_time || u.createdAt
+          }));
+
+          // Sort by newest
+          hydratedUsers.sort((a, b) => {
+             const timeA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(0);
+             const timeB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(0);
+             return timeB - timeA;
+          });
+
+          setReferrals(hydratedUsers);
+          setStats(prev => ({ 
+              ...prev, 
+              totalEarnings: earningsSum,
+              activeSubs: activeUserIds.size 
+          }));
+          
+      } catch (err) {
+          console.error("Ledger Fetch Error:", err);
+      } finally {
+          setDataLoading(false);
+      }
+  };
+
+  // Referral Link Logic
   const referralLink = `https://writeoffgenie-link.vercel.app/?ref=${profile?.referralCode || ''}`;
 
   const copyLink = () => {
@@ -164,12 +153,10 @@ function Dashboard() {
       toast.error('Please enter a recipient email');
       return;
     }
-
     if (!profile?.referralCode) {
         toast.error('Referral code not found. Please contact support.');
         return;
     }
-
     // Validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(inviteEmail)) {
@@ -183,17 +170,14 @@ function Dashboard() {
     try {
       const functions = getFunctions();
       const sendInvite = httpsCallable(functions, 'sendReferralInvite');
-
-      // ⚠️ FIX: Sending 'referralCode' instead of 'referralLink'
-      // The backend builds the secure link automatically
       await sendInvite({
         email: inviteEmail,
         senderName: profile?.name || "Your Accountant",
-        referralCode: profile.referralCode // Pass just the code
+        referralCode: profile.referralCode
       });
 
       toast.success(`Invite sent to ${inviteEmail}`, { id: toastId });
-      setInviteEmail(""); // Reset input
+      setInviteEmail(""); 
 
     } catch (error) {
       console.error("Invite Error:", error);
@@ -208,9 +192,8 @@ function Dashboard() {
     const searchLower = searchQuery.toLowerCase();
     return referrals.filter(client => {
       const email = (client.email || '').toLowerCase();
-      const name = (client.name || '').toLowerCase();
-      const plan = (client.subscription?.planType || 'free').toLowerCase();
-      return email.includes(searchLower) || name.includes(searchLower) || plan.includes(searchLower);
+      const name = (client.display_name || client.name || '').toLowerCase();
+      return email.includes(searchLower) || name.includes(searchLower);
     });
   }, [referrals, searchQuery]);
 
@@ -223,15 +206,7 @@ function Dashboard() {
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-full animate-in fade-in duration-500 pb-10">
-      <Toaster 
-        position="top-right" 
-        toastOptions={{
-          duration: 4000,
-          style: { borderRadius: '10px', padding: '12px 16px', fontSize: '13px', fontWeight: '500' },
-          success: { style: { background: '#10b981', color: '#fff' } },
-          error: { style: { background: '#ef4444', color: '#fff' } },
-        }}
-      />
+      <Toaster position="top-right" />
       
       {/* Header */}
       <div>
@@ -241,10 +216,34 @@ function Dashboard() {
 
       {/* KPI Cards Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-        <StatCard title="Total Earnings" value={`$${(profile?.stats?.totalEarnings || 0).toLocaleString()}`} description="Amount earned from subscriptions" icon={RevenueIcon} isLoading={dataLoading} />
-        <StatCard title="Commission Rate" value={`${profile?.commissionRate || 10}%`} description="Your earnings percentage" icon={TrendingUp} isLoading={dataLoading} />
-        <StatCard title="Users Referred" value={totalReferred} description="Total signups via your link" icon={UsersIconLarge} isLoading={dataLoading} />
-        <StatCard title="Active Subscriptions" value={totalSubscribed} description="Users with active paid plans" icon={SubscriptionIcon} isLoading={dataLoading} />
+        <StatCard 
+            title="Total Earnings" 
+            value={`$${stats.totalEarnings.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} 
+            description="Amount earned from subscriptions" 
+            icon={RevenueIcon} 
+            isLoading={dataLoading} 
+        />
+        <StatCard 
+            title="Commission Rate" 
+            value={`${profile?.commissionRate || 10}%`} 
+            description="Your earnings percentage" 
+            icon={TrendingUp} 
+            isLoading={dataLoading} 
+        />
+        <StatCard 
+            title="Users Referred" 
+            value={stats.totalReferred} 
+            description="Total signups via your link" 
+            icon={UsersIconLarge} 
+            isLoading={dataLoading} 
+        />
+        <StatCard 
+            title="Active Subscriptions" 
+            value={stats.activeSubs} 
+            description="Users with active paid plans" 
+            icon={SubscriptionIcon} 
+            isLoading={dataLoading} 
+        />
       </div>
 
       {/* Invite & Link Section */}
@@ -339,15 +338,16 @@ function Dashboard() {
           {filteredReferrals.length > 0 ? (
             filteredReferrals.slice(0, 5).map((client) => {
               const isActive = client.subscription?.status === "active";
-              const latestSub = client.subscriptions?.[0];
-              const planName = latestSub?.planname?.replace('writeoffgenie-', '').replace('com.writeoffgenie.', '').replace('.monthly', '').replace('.yearly', '') || "Free";
+              // Only check subscription plan if active, otherwise show Free
+              const planName = isActive ? "Premium" : "Free";
+              
               const commissionRate = (profile?.commissionRate || 10) / 100;
               const commission = (client.totalRevenue * commissionRate).toFixed(2);
               
               return (
                 <div key={client.id} className="flex flex-col md:flex-row md:items-center justify-between p-3 hover:bg-slate-50 rounded-lg transition-colors border border-transparent hover:border-[#E3E6EA]">
                   <div className="w-full md:w-1/3 mb-2 md:mb-0">
-                    <p className="text-[#111111] text-sm font-medium truncate">{client.name || "Unknown User"}</p>
+                    <p className="text-[#111111] text-sm font-medium truncate">{client.display_name || client.name || "Unknown User"}</p>
                     <p className="text-[#9499A1] text-xs truncate">{client.email}</p>
                   </div>
                   
