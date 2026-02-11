@@ -6,7 +6,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useSearch } from "../../context/SearchContext";
 import { useNavigate } from "react-router-dom";
 import { 
-  Search, Loader2, Ban, CheckCircle2, UserPlus, X, DollarSign, TrendingUp, Users, Eye, Activity
+  Search, Loader2, Ban, CheckCircle2, UserPlus, X, DollarSign, TrendingUp, Users, Eye, Activity, Wallet
 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import StatCard from "../../components/common/StatCard";
@@ -93,56 +93,41 @@ export default function AgentManagement() {
         const cpasSnapshot = await getDocs(cpasQuery);
         agent.cpaCount = cpasSnapshot.size;
 
-        // Calculate revenue, CPA commissions, and active clients
         let agentTotalRevenue = 0;
         let agentCPACommissions = 0;
+        let agentActiveSubscriptions = 0;
         let agentActiveClients = 0;
 
         for (const cpaDoc of cpasSnapshot.docs) {
           const cpaData = cpaDoc.data();
           const cpaCommissionRate = (cpaData.commissionRate || 10) / 100;
           const cpaReferralCode = cpaData.referralCode;
-
           if (!cpaReferralCode) continue;
-
           // Query users who have this CPA's referral code
           const usersQuery = query(
             collection(db, "user"),
             where("referral_code", "==", cpaReferralCode)
           );
           const usersSnapshot = await getDocs(usersQuery);
-          
           for (const userDoc of usersSnapshot.docs) {
             const userId = userDoc.id;
-            
             // Fetch all subscriptions for this user
             const subsSnap = await getDocs(collection(db, "user", userId, "subscription"));
-            
             let userHasActiveSubscription = false;
             let userTotalRevenue = 0;
-            
             for (const subDoc of subsSnap.docs) {
               const subData = subDoc.data();
               const price = getPlanPrice(subData.planname);
-              
-              // Add to cumulative revenue (all subscriptions count)
               userTotalRevenue += price;
-              
               // Check if this subscription is active
               const expirationDate = subData.expiration_date?.toDate();
               if (subData.status === 'active' && expirationDate && expirationDate > now) {
                 userHasActiveSubscription = true;
               }
             }
-            
-            // Add user's cumulative revenue
             agentTotalRevenue += userTotalRevenue;
-            
-            // Calculate CPA commission on total revenue
             const cpaCommission = userTotalRevenue * cpaCommissionRate;
             agentCPACommissions += cpaCommission;
-            
-            // Count as active client if they have at least one active subscription
             if (userHasActiveSubscription) {
               agentActiveClients++;
             }
@@ -306,34 +291,24 @@ export default function AgentManagement() {
       </div>
 
       {/* --- STATS CARDS --- */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <StatCard 
-          title="Total Revenue" 
+          title="Total Revenue from Agents" 
           value={formatCurrency(stats.totalRevenue)} 
-          subtitle="From all agents" 
-          IconComponent={DollarSign} 
-          iconBgColor="bg-[#00C853]"
+          description="Revenue generated from all agents' referred CPAs" 
+          icon={DollarSign} 
         />
         <StatCard 
-          title="Net Profit" 
-          value={formatCurrency(stats.totalNetProfit)} 
-          subtitle="After CPA commissions & maintenance" 
-          IconComponent={TrendingUp} 
-          iconBgColor="bg-[#4D7CFE]"
-        />
-        <StatCard 
-          title="Agent Commissions" 
+          title="Total Commissions" 
           value={formatCurrency(stats.totalAgentCommission)} 
-          subtitle="Based on net profit" 
-          IconComponent={TrendingUp} 
-          iconBgColor="bg-[#00C853]"
+          description="Total commission paid to agents" 
+          icon={TrendingUp} 
         />
         <StatCard 
-          title="Active Subscriptions" 
-          value={stats.activeSubscriptions} 
-          subtitle="Via agents" 
-          IconComponent={Users} 
-          iconBgColor="bg-[#00C853]"
+          title="Net Revenue" 
+          value={formatCurrency(stats.totalNetProfit)} 
+          description="After agent commissions" 
+          icon={Wallet} 
         />
       </div>
 

@@ -1,9 +1,12 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { collection, getDocs, collectionGroup } from "firebase/firestore";
 import { db } from "../../services/firebase";
-import { Loader2, Download, DollarSign, Wallet, TrendingUp } from "../../components/Icons";
+// Standard imports from your local file
+import { Loader2, DollarSign, Wallet, TrendingUp, Users } from "../../components/Icons"; 
+// Direct import to bypass the "export named AlertCircle" error
+import { AlertCircle, PieChart } from "lucide-react"; 
 import StatCard from "../../components/common/StatCard";
-import { Toaster } from "react-hot-toast";
+import toast, { Toaster } from "react-hot-toast";
 
 const PLAN_PRICES = {
   'writeoffgenie-premium-month': 25.00,
@@ -17,75 +20,65 @@ const PLAN_PRICES = {
 };
 
 export default function EarningsTracking() {
-  const [usersWithSubs, setUsersWithSubs] = useState([]);
-  const [partners, setPartners] = useState({});
-  const [partnersByCode, setPartnersByCode] = useState({});
   const [loading, setLoading] = useState(true);
+  const [rawSubData, setRawSubData] = useState([]);
+  const [partnerMap, setPartnerMap] = useState({ byId: {}, byCode: {} });
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // 3 PARALLEL QUERIES - Fast for 500+ users
         const [pSnap, uSnap, allSubsSnap] = await Promise.all([
           getDocs(collection(db, "Partners")),
           getDocs(collection(db, "user")),
-          getDocs(collectionGroup(db, "subscription")) // ALL subscriptions in ONE query!
+          getDocs(collectionGroup(db, "subscription"))
         ]);
         
-        // Build user map
-        const userMap = {};
+        const userRefCodes = {};
         uSnap.docs.forEach(d => {
-          userMap[d.id] = { id: d.id, ...d.data() };
-        });
-        
-        const pMap = {};
-        const pByCode = {};
-        pSnap.forEach(d => {
-          const data = d.data();
-          const partner = { 
-            id: d.id,
-            name: data.displayName || data.name || "Unknown", 
-            code: data.referralCode, 
-            role: data.role,
-            commissionRate: data.role === 'agent' ? 0.10 : ((data.commissionRate || 10) / 100),
-            commissionPercentage: data.commissionPercentage || 15,
-            maintenanceCostPerUser: data.maintenanceCostPerUser || 6.00,
-            referredBy: data.referredBy
-          };
-          pMap[d.id] = partner;
-          if (data.referralCode) {
-            pByCode[data.referralCode] = partner;
+          const u = d.data();
+          if (u.referral_code) {
+            userRefCodes[d.id] = String(u.referral_code).toLowerCase().trim();
           }
         });
-        setPartners(pMap);
-        setPartnersByCode(pByCode);
-
-        // Process ALL subscriptions from collection group query
-        const usersData = [];
         
-        allSubsSnap.docs.forEach(subDoc => {
-          const subData = { id: subDoc.id, ...subDoc.data() };
-          
-          // Get userId from doc path: user/{userId}/subscription/{subId}
-          const pathParts = subDoc.ref.path.split('/');
-          const userId = pathParts[1];
-          const userData = userMap[userId] || { id: userId };
-          
-          const planPrice = PLAN_PRICES[subData.planname] || 0;
-          usersData.push({
-            ...userData,
-            subscription: {
-              ...subData,
-              amountPaid: planPrice,
-              planType: subData.planname
-            },
-            referralCode: userData.referral_code || subData.ref_code
-          });
+        const byId = {};
+        const byCode = {};
+        pSnap.forEach(d => {
+          const p = d.data();
+          const partner = { 
+            id: d.id,
+            name: p.displayName || p.name || "Unknown", 
+            code: p.referralCode ? String(p.referralCode).toLowerCase().trim() : null, 
+            role: String(p.role || '').toLowerCase(),
+            cpaRate: (p.commissionRate || 10) / 100,
+            agentRate: (p.commissionPercentage || 15) / 100,
+            maint: Number(p.maintenanceCostPerUser || 6.00),
+            referredBy: p.referredBy
+          };
+          byId[d.id] = partner;
+          if (partner.code) byCode[partner.code] = partner;
         });
 
-        setUsersWithSubs(usersData);
+        const subscriptions = allSubsSnap.docs.map(subDoc => {
+          const sub = subDoc.data();
+          const userId = subDoc.ref.path.split('/')[1];
+          const price = PLAN_PRICES[sub.planname] || 0;
+          const finalCode = userRefCodes[userId] || (sub.ref_code ? String(sub.ref_code).toLowerCase().trim() : null);
+
+          return {
+            id: subDoc.id,
+            price,
+            status: sub.status,
+            expiration: sub.expiration_date?.toDate ? sub.expiration_date.toDate() : (sub.expiration_date ? new Date(sub.expiration_date) : null),
+            refCode: finalCode
+          };
+        });
+
+        setPartnerMap({ byId, byCode });
+        setRawSubData(subscriptions);
       } catch (e) {
-        console.error(e);
+        console.error("Fetch error:", e);
+        toast.error("Failed to sync live data");
       } finally {
         setLoading(false);
       }
@@ -93,183 +86,107 @@ export default function EarningsTracking() {
     fetchData();
   }, []);
 
-  // Calculate Totals (separated by Agent and CPA tiers) - ONLY ACTIVE SUBSCRIPTIONS
   const stats = useMemo(() => {
-    let cpaRevenue = 0;
-    let cpaCommission = 0;
-    
-    // Group subscriptions by agent for proper commission calculation
-    const agentStats = {}; // agentId -> { revenue, cpaCommissions, activeSubscriptions }
     const now = new Date();
-    
-    usersWithSubs.forEach(u => {
-      // Only count ACTIVE subscriptions
-      const expirationDate = u.subscription?.expiration_date?.toDate?.() || u.subscription?.expiration_date;
-      const isActive = u.subscription?.status === 'active' && expirationDate && new Date(expirationDate) > now;
-      
-      if (!isActive) return; // Skip inactive subscriptions
-      
-      const amount = u.subscription?.amountPaid || 0;
-      const refCode = u.referralCode;
-      const directCPA = refCode ? partnersByCode[refCode] : null;
-      
-      if (!directCPA) return; // Skip if no referrer
-      
-      // CPA commission
-      const cpaRate = directCPA.commissionRate;
-      const cpaComm = amount * cpaRate;
-      cpaRevenue += amount;
-      cpaCommission += cpaComm;
-      
-      // Track per-agent stats (if CPA was referred by an Agent)
-      if (directCPA.referredBy && partners[directCPA.referredBy]) {
-        const agent = partners[directCPA.referredBy];
-        if (agent.role === 'agent') {
-          const agentId = directCPA.referredBy;
-          if (!agentStats[agentId]) {
-            agentStats[agentId] = { 
-              revenue: 0, 
-              cpaCommissions: 0, 
-              activeSubscriptions: 0,
-              commissionRate: (agent.commissionPercentage || 15) / 100,
-              maintenanceCost: agent.maintenanceCostPerUser || 6.00
-            };
+    let cpaTotalRev = 0;
+    let cpaTotalComm = 0;
+    let agentTotalRev = 0;
+    const agentBuckets = {};
+
+    rawSubData.forEach(sub => {
+      if (sub.price === 0 || !sub.refCode) return;
+
+      const cpa = partnerMap.byCode[sub.refCode];
+      if (!cpa) return;
+
+      cpaTotalRev += sub.price;
+      const cpaComm = sub.price * cpa.cpaRate;
+      cpaTotalComm += cpaComm;
+
+      if (cpa.referredBy && partnerMap.byId[cpa.referredBy]) {
+        const agent = partnerMap.byId[cpa.referredBy];
+        if (agent.role.includes('agent')) {
+          const agentId = agent.id;
+          if (!agentBuckets[agentId]) {
+            agentBuckets[agentId] = { rev: 0, cpaPaid: 0, activeCount: 0, config: agent };
           }
-          agentStats[agentId].revenue += amount;
-          agentStats[agentId].cpaCommissions += cpaComm;
-          agentStats[agentId].activeSubscriptions++;
+          agentBuckets[agentId].rev += sub.price;
+          agentBuckets[agentId].cpaPaid += cpaComm;
+          const isActive = sub.status === 'active' && sub.expiration && sub.expiration > now;
+          if (isActive) agentBuckets[agentId].activeCount++;
+          agentTotalRev += sub.price;
         }
       }
     });
-    
-    // Calculate agent commission using the correct formula per agent
-    let agentRevenue = 0;
-    let agentCommission = 0;
-    
-    Object.values(agentStats).forEach(agent => {
-      agentRevenue += agent.revenue;
-      // Formula: Rate% × [(Revenue - CPA Commissions) - (Active Subs × Maintenance Cost)]
-      const netRevenue = agent.revenue - agent.cpaCommissions;
-      const maintenanceCosts = agent.activeSubscriptions * agent.maintenanceCost;
-      const netProfit = netRevenue - maintenanceCosts;
-      const agentComm = Math.max(0, netProfit * agent.commissionRate);
-      agentCommission += agentComm;
+
+    let agentTotalComm = 0;
+    Object.values(agentBuckets).forEach(b => {
+      const netProfit = (b.rev - b.cpaPaid) - (b.activeCount * b.config.maint);
+      agentTotalComm += Math.max(0, netProfit * b.config.agentRate);
     });
 
-    // Count only active subscriptions for total revenue
-    const activeUsers = usersWithSubs.filter(u => {
-      const expirationDate = u.subscription?.expiration_date?.toDate?.() || u.subscription?.expiration_date;
-      return u.subscription?.status === 'active' && expirationDate && new Date(expirationDate) > now;
-    });
-    const totalRevenue = activeUsers.reduce((acc, u) => acc + (u.subscription?.amountPaid || 0), 0);
-    const totalCommission = agentCommission + cpaCommission;
-    const netRevenue = totalRevenue - totalCommission;
-    const netAgentRevenue = agentRevenue - agentCommission;
-    const netCPARevenue = cpaRevenue - cpaCommission;
-
-    return { 
-      totalRevenue, 
-      totalCommission, 
-      netRevenue,
-      agentRevenue,
-      agentCommission,
-      netAgentRevenue,
-      cpaRevenue,
-      cpaCommission,
-      netCPARevenue
+    return {
+      cpaRev: cpaTotalRev,
+      cpaComm: cpaTotalComm,
+      cpaNet: cpaTotalRev - cpaTotalComm,
+      agentRev: agentTotalRev,
+      agentComm: agentTotalComm,
+      agentNet: agentTotalRev - agentTotalComm
     };
-  }, [usersWithSubs, partners, partnersByCode]);
+  }, [rawSubData, partnerMap]);
 
-  const formatDate = (timestamp) => {
-    if (!timestamp) return "N/A";
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
+  const formatCurrency = (val) => `$${val.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
 
-  const formatCurrency = (amount) => `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-
-  const downloadCSV = () => {
-    const headers = ['Date', 'CPA Name', 'Agent Name', 'User Name', 'User Email', 'Plan', 'Amount', 'CPA Commission', 'Agent Commission', 'Net Revenue', 'Status'];
-    const rows = usersWithSubs.map(u => {
-      const amount = u.subscription?.amountPaid || 0;
-      const refCode = u.referralCode;
-      const directCPA = refCode ? partnersByCode[refCode] : null;
-      const cpaName = directCPA ? directCPA.name : "Direct / Organic";
-      const cpaComm = directCPA ? (amount * directCPA.commissionRate) : 0;
-      
-      let agentName = "N/A";
-      let agentComm = 0;
-      if (directCPA && directCPA.referredBy && partners[directCPA.referredBy]) {
-        const agent = partners[directCPA.referredBy];
-        if (agent.role === 'agent') {
-          agentName = agent.name;
-          agentComm = amount * 0.10;
-        }
-      }
-      
-      const net = amount - cpaComm - agentComm;
-      const isCredited = u.subscription?.status === 'active';
-      
-      return [
-        formatDate(u.created_time || u.createdAt), cpaName, agentName, u.display_name || u.displayName || u.name || 'N/A', u.email || 'N/A',
-        u.subscription?.planType || 'Free', amount.toFixed(2), cpaComm.toFixed(2), agentComm.toFixed(2),
-        net.toFixed(2), isCredited ? 'Credited' : 'Pending'
-      ];
-    });
-
-    // Add Summary Row
-    rows.push([]);
-    rows.push(['--- SUMMARY ---']);
-    rows.push(['Agent Revenue', '', '', '', '', '', stats.agentRevenue.toFixed(2)]);
-    rows.push(['Agent Commission', '', '', '', '', '', '', stats.agentCommission.toFixed(2)]);
-    rows.push(['Net Agent Revenue', '', '', '', '', '', '', '', stats.netAgentRevenue.toFixed(2)]);
-    rows.push([]);
-    rows.push(['CPA Revenue', '', '', '', '', '', stats.cpaRevenue.toFixed(2)]);
-    rows.push(['CPA Commission', '', '', '', '', '', '', stats.cpaCommission.toFixed(2)]);
-    rows.push(['Net CPA Revenue', '', '', '', '', '', '', '', stats.netCPARevenue.toFixed(2)]);
-    rows.push([]);
-    rows.push(['Total Revenue', '', '', '', '', '', stats.totalRevenue.toFixed(2)]);
-    rows.push(['Total Commission', '', '', '', '', '', '', stats.totalCommission.toFixed(2)]);
-    rows.push(['Net Platform Revenue', '', '', '', '', '', '', '', stats.netRevenue.toFixed(2)]);
-
-    const csvContent = [headers.join(','), ...rows.map(r => r.map(c => `"${c}"`).join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `earnings_report_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-  };
-
-  if (loading) return <div className="h-[60vh] flex items-center justify-center"><Loader2 className="animate-spin text-[#4D7CFE]" size={32}/></div>;
+  if (loading) return <div className="h-96 flex items-center justify-center"><Loader2 className="animate-spin text-blue-500" size={32}/></div>;
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 pb-10">
+    <div className="space-y-10 pb-20">
+      <Toaster position="top-right" />
       
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-end gap-6">
+      <div className="flex items-center justify-between">
         <div>
-           <h1 className="text-2xl font-bold text-[#111111]">Earnings & Revenue</h1>
-           <p className="text-sm text-[#9499A1] mt-1">Track platform revenue, Agent & CPA commissions, and payouts</p>
+          <h1 className="text-2xl font-bold text-slate-900">Financial Tracking</h1>
+          <p className="text-slate-500">Real-time revenue and commission analysis</p>
         </div>
-        <button 
-          onClick={downloadCSV}
-          className="bg-black hover:bg-gray-800 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-all shadow-sm flex items-center gap-2 cursor-pointer"
-        >
-            <Download size={16}/> Download report
-        </button>
+        <div className="p-3 bg-blue-50 rounded-full text-blue-600">
+          <PieChart size={24} />
+        </div>
       </div>
 
-      {/* Stats Grid - 6 Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        <StatCard title="Active Agent Revenue" value={formatCurrency(stats.agentRevenue)} description="Active subscriptions via Agent CPAs" icon={DollarSign}/>
-        <StatCard title="Agent Commission Payable" value={formatCurrency(stats.agentCommission)} description="Rate% × (Net Profit - Maintenance)" icon={TrendingUp}/>
-        <StatCard title="Net Agent Revenue" value={formatCurrency(stats.netAgentRevenue)} description="Platform keeps after agent comm" icon={Wallet}/>
-        
-        <StatCard title="Active CPA Revenue" value={formatCurrency(stats.cpaRevenue)} description="Active subscriptions via CPAs" icon={DollarSign}/>
-        <StatCard title="CPA Commission Payable" value={formatCurrency(stats.cpaCommission)} description="Sum of all CPA commissions" icon={TrendingUp}/>
-        <StatCard title="Net CPA Revenue" value={formatCurrency(stats.netCPARevenue)} description="Platform keeps after CPA comm" icon={Wallet}/>
-      </div>
-      <Toaster position="top-right" />
+      {/* CPA TIER */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2 text-emerald-600 font-bold uppercase text-[10px] tracking-widest bg-emerald-50 w-fit px-2 py-1 rounded">
+          <Users size={12}/> CPA Performance Tier
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <StatCard title="Total CPA Revenue" value={formatCurrency(stats.cpaRev)} description="All revenue via CPA codes" icon={DollarSign}/>
+          <StatCard title="CPA Commissions" value={formatCurrency(stats.cpaComm)} description="Total earnings paid to CPAs" icon={TrendingUp}/>
+          <StatCard title="CPA Net Profit" value={formatCurrency(stats.cpaNet)} description="Revenue after CPA payout" icon={Wallet}/>
+        </div>
+      </section>
+
+      {/* AGENT TIER */}
+      <section className="space-y-4">
+        <div className="flex items-center gap-2 text-blue-600 font-bold uppercase text-[10px] tracking-widest bg-blue-50 w-fit px-2 py-1 rounded">
+          <Users size={12}/> Agent Performance Tier
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <StatCard title="Total Agent Revenue" value={formatCurrency(stats.agentRev)} description="Revenue from Agent-led network" icon={DollarSign}/>
+          <StatCard title="Agent Commissions" value={formatCurrency(stats.agentComm)} description="Net profit share for Agents" icon={TrendingUp}/>
+          <StatCard title="Agent Net Profit" value={formatCurrency(stats.agentNet)} description="Platform revenue after Agent cut" icon={Wallet}/>
+        </div>
+      </section>
+
+      {/* Troubleshooting Alert */}
+      {stats.cpaRev === 0 && (
+        <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex gap-3 text-amber-800">
+          <AlertCircle className="shrink-0" size={20} />
+          <div className="text-sm">
+            <p className="font-bold">No live data found</p>
+            <p>Ensure the <strong>referral_code</strong> on users matches the <strong>referralCode</strong> in Partners exactly.</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

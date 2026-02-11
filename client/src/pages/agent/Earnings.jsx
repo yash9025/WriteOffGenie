@@ -237,7 +237,7 @@ const Earnings = () => {
         <StatCard
           title="Your Total Commission"
           value={formatCurrency(stats.totalAgentCommission)}
-          description="10% of CPA revenue"
+          description="Comission from CPA Revenue"
           icon={TrendingUp}
           isLoading={loading}
         />

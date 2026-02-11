@@ -3,7 +3,6 @@ import admin from "firebase-admin";
 
 const db = admin.firestore();
 
-// Pricing lookup table
 const PLAN_PRICES = {
     'writeoffgenie-premium-month': 25.00,
     'com.writeoffgenie.premium.monthly': 25.00,
@@ -17,137 +16,122 @@ const PLAN_PRICES = {
 
 const getPlanPrice = (planname) => PLAN_PRICES[planname] || 0;
 
-/**
- * TRIGGER: When a new subscription document is created in user/{userId}/subscription
- * This handles:
- * - Initial subscription purchases
- * - Monthly/yearly renewals (each renewal = new document = new commission)
- */
 export const onSubscriptionCreatedTrigger = onDocumentCreated(
     "user/{userId}/subscription/{subscriptionId}",
     async (event) => {
-        const subscriptionData = event.data.data();
+        const subData = event.data.data();
         const userId = event.params.userId;
-        
-        console.log(`🔔 New subscription created for user ${userId}:`, subscriptionData);
+
+        // 1. Validation: Only process active, paid subscriptions
+        if (!subData || subData.status !== 'active') return null;
 
         try {
-            // Get user document to find referral_code
+            const planAmount = getPlanPrice(subData.planname);
+            if (planAmount === 0) return null;
+
+            // 2. Resolve Referral Code (Normalize to uppercase)
             const userDoc = await db.collection("user").doc(userId).get();
-            if (!userDoc.exists) {
-                console.log(`❌ User ${userId} not found`);
-                return;
-            }
+            const rawCode = userDoc.data()?.referral_code || subData.ref_code;
+            if (!rawCode) return null;
+            const refCode = String(rawCode).toUpperCase().trim();
 
-            const userData = userDoc.data();
-            const referralCode = userData.referral_code || subscriptionData.ref_code;
-
-            if (!referralCode) {
-                console.log(`⚠️ No referral code for user ${userId} - Free user, no commission`);
-                return;
-            }
-
-            // Find CPA by referral code
+            // 3. Find CPA Partner
             const cpaQuery = await db.collection("Partners")
-                .where("referralCode", "==", referralCode)
+                .where("referralCode", "==", refCode)
                 .where("role", "==", "cpa")
-                .limit(1)
-                .get();
+                .limit(1).get();
 
-            if (cpaQuery.empty) {
-                console.log(`⚠️ No CPA found with referral code: ${referralCode}`);
-                return;
-            }
+            if (cpaQuery.empty) return null;
 
             const cpaDoc = cpaQuery.docs[0];
-            const cpaId = cpaDoc.id;
             const cpaData = cpaDoc.data();
-            
-            // Calculate plan price and CPA commission
-            const planAmount = getPlanPrice(subscriptionData.planname);
-            if (planAmount === 0) {
-                console.log(`⚠️ Unknown plan: ${subscriptionData.planname}`);
-                return;
-            }
+            const batch = db.batch();
 
-            const cpaCommissionRate = (cpaData.commissionRate || 10) / 100;
-            const cpaCommission = planAmount * cpaCommissionRate;
+            // 4. Calculate CPA Earnings
+            const cpaRate = (cpaData.commissionRate || 10) / 100;
+            const cpaCommission = planAmount * cpaRate;
 
-            console.log(`💰 Processing: Plan=${subscriptionData.planname}, Amount=$${planAmount}, CPA Commission=$${cpaCommission}`);
-
-            // Update CPA stats
-            await db.collection("Partners").doc(cpaId).update({
+            // Update CPA Stats & Wallet
+            batch.update(cpaDoc.ref, {
                 "stats.totalRevenue": admin.firestore.FieldValue.increment(planAmount),
                 "stats.totalEarnings": admin.firestore.FieldValue.increment(cpaCommission),
                 "stats.totalSubscribed": admin.firestore.FieldValue.increment(1),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                "walletBalance": admin.firestore.FieldValue.increment(cpaCommission),
+                "updatedAt": admin.firestore.FieldValue.serverTimestamp()
             });
 
-            console.log(`✅ Updated CPA ${cpaData.displayName || cpaData.name}: +$${planAmount} revenue, +$${cpaCommission} earnings`);
+            // 5. AGENT LOGIC: Calculate Agent cut if CPA was referred by an Agent
+            let agentCommission = 0;
+            if (cpaData.referredBy) {
+                const agentRef = db.collection("Partners").doc(cpaData.referredBy);
+                const agentDoc = await agentRef.get();
+                
+                if (agentDoc.exists && agentDoc.data().role === 'agent') {
+                    const agentData = agentDoc.data();
+                    const agentRate = (agentData.commissionPercentage || 15) / 100;
+                    const maintenance = Number(agentData.maintenanceCostPerUser || 6.00);
 
-            // NOTE: Agent commission is calculated dynamically in the frontend
-            // using the formula: agentCommission = (commissionPercentage%) * [(totalRevenue - totalCPACommissions) - (activeSubscriptions * maintenanceCost)]
-            // No need to update agent stats here - it's calculated on-the-fly from their CPAs' data
+                    // Formula: AgentRate * [(Revenue - CPA_Paid) - Maintenance]
+                    const netProfit = (planAmount - cpaCommission) - maintenance;
+                    agentCommission = Math.max(0, netProfit * agentRate);
 
-            return { success: true };
+                    if (agentCommission > 0) {
+                        batch.update(agentRef, {
+                            "stats.totalEarnings": admin.firestore.FieldValue.increment(agentCommission),
+                            "walletBalance": admin.firestore.FieldValue.increment(agentCommission),
+                            "updatedAt": admin.firestore.FieldValue.serverTimestamp()
+                        });
+                    }
+                }
+            }
+
+            // 6. Audit Trail: Log the specific commission transaction
+            const txnRef = db.collection("Transactions").doc();
+            batch.set(txnRef, {
+                type: "commission",
+                plan: subData.planname,
+                amountPaid: planAmount,
+                cpaId: cpaDoc.id,
+                cpaEarnings: cpaCommission,
+                agentId: cpaData.referredBy || null,
+                agentEarnings: agentCommission,
+                userId: userId,
+                subId: event.params.subscriptionId,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                status: "completed"
+            });
+
+            await batch.commit();
+            console.log(`✅ Commission Sync: CPA +$${cpaCommission.toFixed(2)}, Agent +$${agentCommission.toFixed(2)}`);
 
         } catch (error) {
-            console.error("❌ Error processing subscription:", error);
-            // Don't throw - we don't want to block subscription creation
-            return { error: error.message };
+            console.error("❌ Commission Trigger Error:", error);
         }
     }
 );
 
-/**
- * TRIGGER: When a new user document is created
- * This handles user registration/signup
- */
+// Keep your existing User Creation Trigger below...
 export const onUserCreatedTrigger = onDocumentCreated(
     "user/{userId}",
     async (event) => {
         const userData = event.data.data();
         const userId = event.params.userId;
-        
-        console.log(`👤 New user created: ${userId}`, userData);
-
         try {
             const referralCode = userData.referral_code;
+            if (!referralCode) return;
 
-            if (!referralCode) {
-                console.log(`⚠️ User ${userId} has no referral code - organic signup`);
-                return;
-            }
-
-            // Find CPA by referral code
             const cpaQuery = await db.collection("Partners")
-                .where("referralCode", "==", referralCode)
-                .where("role", "==", "cpa")
-                .limit(1)
-                .get();
+                .where("referralCode", "==", String(referralCode).toUpperCase().trim())
+                .limit(1).get();
 
-            if (cpaQuery.empty) {
-                console.log(`⚠️ No CPA found with referral code: ${referralCode}`);
-                return;
+            if (!cpaQuery.empty) {
+                await cpaQuery.docs[0].ref.update({
+                    "stats.totalReferred": admin.firestore.FieldValue.increment(1),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
             }
-
-            const cpaDoc = cpaQuery.docs[0];
-            const cpaId = cpaDoc.id;
-            const cpaData = cpaDoc.data();
-
-            // Increment totalReferred (even for free users)
-            await db.collection("Partners").doc(cpaId).update({
-                "stats.totalReferred": admin.firestore.FieldValue.increment(1),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp()
-            });
-
-            console.log(`✅ CPA ${cpaData.displayName || cpaData.name}: +1 referred user`);
-
-            return { success: true };
-
         } catch (error) {
             console.error("❌ Error processing user creation:", error);
-            return { error: error.message };
         }
     }
 );

@@ -118,20 +118,23 @@ export const getAgentCPAs = onCall({ cors: true }, async (request) => {
  * Process Agent Commission
  * Called when a CPA earns commission to calculate and credit agent's share
  */
+/**
+ * Process Agent Commission
+ * Updated to use variable commissionPercentage and maintenanceCostPerUser from the Agent's profile.
+ */
 export const processAgentCommission = onCall({ cors: true }, async (request) => {
-  // This should only be called by backend/admin
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Authentication required.');
   }
 
-  const { cpaId, clientId, amount, cpaCommission } = request.data;
+  const { cpaId, clientId, amount, cpaCommission, planName } = request.data;
 
   if (!cpaId || !clientId || !amount) {
     throw new HttpsError('invalid-argument', 'Missing required fields');
   }
 
   try {
-    // Get the CPA's document to find their referrer (agent)
+    // 1. Find the CPA to get the Agent ID (referredBy)
     const cpaDoc = await db.collection("Partners").doc(cpaId).get();
     if (!cpaDoc.exists) {
       throw new HttpsError('not-found', 'CPA not found');
@@ -140,30 +143,42 @@ export const processAgentCommission = onCall({ cors: true }, async (request) => 
     const cpaData = cpaDoc.data();
     const agentId = cpaData.referredBy;
 
-    // If CPA has no referrer (agent), no agent commission
     if (!agentId) {
-      return { 
-        success: true, 
-        agentCommission: 0,
-        message: 'No agent associated with this CPA'
-      };
+      return { success: true, agentCommission: 0, message: 'No agent associated with this CPA' };
     }
 
-    // Verify the referrer is an agent
+    // 2. Fetch the Agent's specific configuration (Variables)
     const agentDoc = await db.collection("Partners").doc(agentId).get();
     if (!agentDoc.exists || agentDoc.data().role !== 'agent') {
-      return {
-        success: true,
-        agentCommission: 0,
-        message: 'Referrer is not an agent'
-      };
+      return { success: true, agentCommission: 0, message: 'Referrer is not a valid agent' };
     }
 
-    // Calculate agent commission (fixed 10% of original amount)
-    const agentCommission = amount * 0.10;
-    const platformRevenue = amount - cpaCommission - agentCommission;
+    const agentData = agentDoc.data();
 
-    // Update agent's wallet balance
+    // --- FORMULA VARIABLES ---
+    const commissionPercent = agentData.commissionPercentage || 15; 
+    const commissionRate = commissionPercent / 100;
+    let maintenanceCost = Number(agentData.maintenanceCostPerUser || 6.00);
+
+    // Scaling maintenance for yearly plans
+    const isYearly = planName && (
+      planName.toLowerCase().includes('year') || 
+      planName.toLowerCase().includes('annual')
+    );
+    if (isYearly) maintenanceCost = maintenanceCost * 12;
+
+    // --- CALCULATION: NET PROFIT FORMULA ---
+    // [ (Revenue - CPA_Commission) - Maintenance ]
+    const netRevenue = Number(amount) - Number(cpaCommission);
+    const netProfit = netRevenue - maintenanceCost;
+
+    // Agent gets % of Net Profit (Safe floor at 0)
+    let agentCommission = netProfit > 0 ? netProfit * commissionRate : 0;
+    agentCommission = Math.round(agentCommission * 100) / 100; // Round to 2 decimals
+
+    const platformRevenue = Number(amount) - Number(cpaCommission) - agentCommission;
+
+    // 3. Update agent's document so 'totalEarnings' stays synced with Frontend
     await db.collection("Partners").doc(agentId).update({
       walletBalance: admin.firestore.FieldValue.increment(agentCommission),
       'stats.totalEarnings': admin.firestore.FieldValue.increment(agentCommission),
@@ -171,7 +186,7 @@ export const processAgentCommission = onCall({ cors: true }, async (request) => 
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
-    // Create transaction record
+    // 4. Create transaction record for auditing
     await db.collection("Transactions").add({
       type: 'commission',
       amount,
@@ -181,7 +196,11 @@ export const processAgentCommission = onCall({ cors: true }, async (request) => 
       cpaCommission,
       agentCommission,
       platformRevenue,
-      description: `Commission from client subscription`,
+      formulaBreakdown: {
+        agentRate: commissionPercent,
+        deductedMaintenance: maintenanceCost,
+        calculatedOnProfit: netProfit
+      },
       status: 'completed',
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
@@ -189,8 +208,7 @@ export const processAgentCommission = onCall({ cors: true }, async (request) => 
     return {
       success: true,
       agentCommission,
-      platformRevenue,
-      message: 'Agent commission processed successfully'
+      platformRevenue
     };
 
   } catch (error) {
