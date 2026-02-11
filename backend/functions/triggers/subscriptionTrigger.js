@@ -47,7 +47,17 @@ export const handleSubscriptionEarnings = onDocumentCreated(
             const cpaData = cpaDoc.data();
             const batch = db.batch();
 
-            // 4. Calculate CPA Earnings
+            // 4. Idempotency: Check if commission transaction already exists for this subscription
+            const txnCheck = await db.collection("Transactions")
+                .where("subId", "==", event.params.subscriptionId)
+                .where("type", "==", "commission")
+                .limit(1).get();
+            if (!txnCheck.empty) {
+                // Already processed, skip
+                return null;
+            }
+
+            // 5. Calculate CPA Earnings
             const cpaRate = (cpaData.commissionRate || 10) / 100;
             const cpaCommission = planAmount * cpaRate;
 
@@ -60,21 +70,18 @@ export const handleSubscriptionEarnings = onDocumentCreated(
                 "updatedAt": admin.firestore.FieldValue.serverTimestamp()
             });
 
-            // 5. AGENT LOGIC: Calculate Agent cut if CPA was referred by an Agent
+            // 6. AGENT LOGIC: Calculate Agent cut if CPA was referred by an Agent
             let agentCommission = 0;
             if (cpaData.referredBy) {
                 const agentRef = db.collection("Partners").doc(cpaData.referredBy);
                 const agentDoc = await agentRef.get();
-                
                 if (agentDoc.exists && agentDoc.data().role === 'agent') {
                     const agentData = agentDoc.data();
                     const agentRate = (agentData.commissionPercentage || 15) / 100;
                     const maintenance = Number(agentData.maintenanceCostPerUser || 6.00);
-
                     // Formula: AgentRate * [(Revenue - CPA_Paid) - Maintenance]
                     const netProfit = (planAmount - cpaCommission) - maintenance;
                     agentCommission = Math.max(0, netProfit * agentRate);
-
                     if (agentCommission > 0) {
                         batch.update(agentRef, {
                             "stats.totalEarnings": admin.firestore.FieldValue.increment(agentCommission),
@@ -85,7 +92,7 @@ export const handleSubscriptionEarnings = onDocumentCreated(
                 }
             }
 
-            // 6. Audit Trail: Log the specific commission transaction
+            // 7. Audit Trail: Log the specific commission transaction
             const txnRef = db.collection("Transactions").doc();
             batch.set(txnRef, {
                 type: "commission",
