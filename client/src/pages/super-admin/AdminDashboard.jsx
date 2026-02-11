@@ -62,7 +62,7 @@ export default function AdminDashboard() {
           getDocs(collectionGroup(db, "subscription"))
         ]);
         
-        // 1. Map Users (Normalize codes to lowercase)
+        // 1. Map Users (Lowercase for matching)
         const userRefCodes = {};
         usersSnap.docs.forEach(d => {
           const uData = d.data();
@@ -71,13 +71,9 @@ export default function AdminDashboard() {
           }
         });
         
-        // 2. Map Partners & Get DB Lifetime Totals
+        // 2. Map Partners
         const partnerById = {};
         const partnerByCode = {};
-        let lifetimeCpaEarnings = 0;
-        let lifetimeAgentEarnings = 0;
-        let lifetimeTotalRevenue = 0;
-
         partnersSnap.docs.forEach(d => {
           const pData = d.data();
           const role = String(pData.role || '').toLowerCase().includes('agent') ? 'agent' : 'cpa';
@@ -89,27 +85,22 @@ export default function AdminDashboard() {
             commissionRate: (pData.commissionRate || 10) / 100,
             commissionPercentage: pData.commissionPercentage || 15,
             maintenanceCostPerUser: pData.maintenanceCostPerUser || 6.00,
-            totalEarnings: Number(pData.stats?.totalEarnings || 0),
-            totalRevenue: Number(pData.stats?.totalRevenue || 0)
           };
-          
           partnerById[d.id] = partner;
           if (partner.referralCode) partnerByCode[partner.referralCode] = partner;
-          
-          if (role === 'cpa') {
-            lifetimeCpaEarnings += partner.totalEarnings;
-            lifetimeTotalRevenue += partner.totalRevenue;
-          } else {
-            lifetimeAgentEarnings += partner.totalEarnings;
-          }
         });
 
-        // 3. Process Subscriptions for Graph & Active Counts
+        // 3. Process Subscriptions (LIFETIME CALCULATION)
         const now = new Date();
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const monthlyData = months.map(m => ({ name: m, revenue: 0, agentCommission: 0, cpaCommission: 0 }));
         
+        let totalRevenueCalculated = 0;
         let activeUsersCount = 0;
+        let totalCpaCommCalculated = 0;
+        let totalAgentCommCalculated = 0;
+
+        // Grouping for Agent Calc (To prevent double counting maintenance)
         const agentCalcBuckets = {};
 
         allSubsSnap.docs.forEach(subDoc => {
@@ -117,32 +108,32 @@ export default function AdminDashboard() {
           const price = getPlanPrice(subData.planname);
           if (price === 0) return;
           
-          // Determine Month
+          // ADD TO GLOBAL REVENUE
+          totalRevenueCalculated += price;
+          
           const purchaseDate = subData.purchase_date?.toDate?.() || subData.created_Time?.toDate?.();
           const monthIdx = purchaseDate ? purchaseDate.getMonth() : null;
 
-          // Check Status
           const expirationDate = subData.expiration_date?.toDate?.();
           const isActive = subData.status === 'active' && expirationDate && expirationDate > now;
           if (isActive) activeUsersCount++;
 
           if (monthIdx !== null) monthlyData[monthIdx].revenue += price;
 
-          // Identify Partners
           const userId = subDoc.ref.path.split('/')[1];
           const refCode = userRefCodes[userId] || (subData.ref_code ? String(subData.ref_code).toLowerCase().trim() : null);
           const cpa = refCode ? partnerByCode[refCode] : null;
 
           if (cpa) {
             const currentCpaComm = price * cpa.commissionRate;
+            totalCpaCommCalculated += currentCpaComm;
             if (monthIdx !== null) monthlyData[monthIdx].cpaCommission += currentCpaComm;
 
-            // Agent Logic
             if (cpa.referredBy) {
               const agent = partnerById[cpa.referredBy];
               if (agent && agent.role === 'agent') {
                 if (!agentCalcBuckets[agent.id]) {
-                  agentCalcBuckets[agent.id] = { rev: 0, cpaComm: 0, active: 0, agentRate: agent.commissionPercentage/100, maint: agent.maintenanceCostPerUser, mIdx: monthIdx };
+                  agentCalcBuckets[agent.id] = { rev: 0, cpaComm: 0, active: 0, rate: agent.commissionPercentage/100, maint: agent.maintenanceCostPerUser, month: monthIdx };
                 }
                 agentCalcBuckets[agent.id].rev += price;
                 agentCalcBuckets[agent.id].cpaComm += currentCpaComm;
@@ -152,20 +143,21 @@ export default function AdminDashboard() {
           }
         });
 
-        // Calculate Agent Graph Data
+        // Final Agent Logic
         Object.values(agentCalcBuckets).forEach(b => {
           const netProfit = (b.rev - b.cpaComm) - (b.active * b.maint);
-          const comm = Math.max(0, netProfit * b.agentRate);
-          if (b.mIdx !== null) monthlyData[b.mIdx].agentCommission += comm;
+          const comm = Math.max(0, netProfit * b.rate);
+          totalAgentCommCalculated += comm;
+          if (b.month !== null) monthlyData[b.month].agentCommission += comm;
         });
 
         setData({ 
-          totalRev: lifetimeTotalRevenue, 
-          totalComm: lifetimeAgentEarnings + lifetimeCpaEarnings, 
+          totalRev: totalRevenueCalculated, 
+          totalComm: totalCpaCommCalculated + totalAgentCommCalculated, 
           activeUsers: activeUsersCount, 
           chartData: monthlyData, 
-          agentComm: lifetimeAgentEarnings, 
-          cpaComm: lifetimeCpaEarnings 
+          agentComm: totalAgentCommCalculated, 
+          cpaComm: totalCpaCommCalculated 
         });
 
       } catch (e) {
@@ -191,17 +183,17 @@ export default function AdminDashboard() {
       
       <div>
          <h1 className="text-2xl font-semibold leading-9 text-[#111111]">Dashboard</h1>
-         <p className="text-base text-[#9499A1]">Lifetime performance and revenue</p>
+         <p className="text-base text-[#9499A1]">Real-time performance and lifetime revenue</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <StatCard title="Total Revenue" value={formatCurrency(data.totalRev)} description="Lifetime gross revenue" icon={DollarSign} />
+        <StatCard title="Total Revenue" value={formatCurrency(data.totalRev)} description="Lifetime gross revenue (all subscriptions)" icon={DollarSign} />
         <StatCard title="Total Commissions" value={formatCurrency(data.totalComm)} description={`Agents: ${formatCurrency(data.agentComm)} + CPAs: ${formatCurrency(data.cpaComm)}`} icon={Percent} />
         <StatCard title="Active Subscriptions" value={data.activeUsers.toLocaleString()} description="Currently active users" icon={Users} />
       </div>
 
       <div className="bg-white border border-[#E3E6EA] rounded-[20px] p-6 shadow-sm">
-        <h2 className="text-xl font-semibold text-[#111111] mb-6">Revenue & Commission Overview</h2>
+        <h2 className="text-xl font-semibold text-[#111111] mb-6">Revenue & Commission Trends</h2>
         <div className="h-80 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data.chartData} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
